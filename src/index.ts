@@ -106,18 +106,16 @@ window.addEventListener("load", () => {
     btnPause.disabled = tracker.getRunState() === "idle";
     btnStop.disabled = tracker.getRunState() === "idle";
 
-    renderLootTable(tracker.getCurrentLoot(), state);
+    renderLootTable(tracker.getCurrentLoot(), state, (k) => tracker.getIconImageData(k));
     renderSessionTable(state.sessions);
 
     saveAppState(state);
   }
 
-  // --- Mode buttons
   el<HTMLButtonElement>("btnModeInv").onclick = () => { setLast("mode: inv"); setMode("inv"); refreshUI(); };
   el<HTMLButtonElement>("btnModeMoney").onclick = () => { setLast("mode: money"); setMode("money"); refreshUI(); };
   setMode("inv");
 
-  // --- Capture full RS frame
   el<HTMLButtonElement>("btnCaptureFull").onclick = () => {
     setLast("clicked: capture full");
     const cap = tracker.captureFullImageData();
@@ -133,7 +131,6 @@ window.addEventListener("load", () => {
     refreshUI("capture ok");
   };
 
-  // --- Selection drawing on full canvas (image coordinates)
   function getCanvasPoint(evt: MouseEvent): { x: number; y: number } {
     const rect = cnvFull.getBoundingClientRect();
     const sx = cnvFull.width / rect.width;
@@ -209,7 +206,6 @@ window.addEventListener("load", () => {
     }
   };
 
-  // --- Manual Set + Preview buttons
   el<HTMLButtonElement>("btnSetInv").onclick = () => {
     setLast("clicked: set inv");
     const r = readRect("inv");
@@ -250,7 +246,6 @@ window.addEventListener("load", () => {
     refreshUI("money preview ok");
   };
 
-  // --- Session controls
   el<HTMLButtonElement>("btnStart").onclick = () => {
     setLast("clicked: start");
     tracker.start(sessionLabel.value.trim() || "Unnamed");

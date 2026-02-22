@@ -1,55 +1,86 @@
-export function aHash64(img: ImageData): string | null {
-  const w = img.width;
-  const h = img.height;
-  if (w <= 0 || h <= 0) return null;
+export function isLikelyItemIcon(img: ImageData): boolean {
+  const w = img.width, h = img.height;
+  if (w < 6 || h < 6) return false;
 
-  // Sample an 8x8 grid across the image
-  const grid = 8;
-  const vals: number[] = [];
-  vals.length = grid * grid;
+  // Sample a 10x10 grid in the CENTER (ignores transparent bg bleed)
+  const grid = 10;
+  const x0 = Math.floor(w * 0.20), x1 = Math.floor(w * 0.80);
+  const y0 = Math.floor(h * 0.20), y1 = Math.floor(h * 0.80);
+  const sw = Math.max(1, x1 - x0);
+  const sh = Math.max(1, y1 - y0);
 
   const data = img.data;
 
-  let sum = 0;
-  let sumSq = 0;
+  let sumLum = 0;
+  let sumLumSq = 0;
+  let sumSat = 0;
+
+  const n = grid * grid;
 
   for (let gy = 0; gy < grid; gy++) {
     for (let gx = 0; gx < grid; gx++) {
-      // sample near center of the cell
-      const x = Math.min(w - 1, Math.floor((gx + 0.5) * w / grid));
-      const y = Math.min(h - 1, Math.floor((gy + 0.5) * h / grid));
+      const x = Math.min(w - 1, x0 + Math.floor((gx + 0.5) * sw / grid));
+      const y = Math.min(h - 1, y0 + Math.floor((gy + 0.5) * sh / grid));
       const i = (y * w + x) * 4;
 
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const sat = max - min; // cheap saturation proxy
 
-      // luminance
-      const lum = (r * 0.299 + g * 0.587 + b * 0.114);
-      vals[gy * grid + gx] = lum;
+      const lum = r * 0.299 + g * 0.587 + b * 0.114;
 
-      sum += lum;
-      sumSq += lum * lum;
+      sumLum += lum;
+      sumLumSq += lum * lum;
+      sumSat += sat;
     }
   }
 
-  const n = vals.length;
-  const mean = sum / n;
-  const variance = Math.max(0, sumSq / n - mean * mean);
-  const stdev = Math.sqrt(variance);
+  const meanLum = sumLum / n;
+  const varLum = Math.max(0, sumLumSq / n - meanLum * meanLum);
+  const stdevLum = Math.sqrt(varLum);
+  const meanSat = sumSat / n;
 
-  // Very low contrast = usually empty slot background
-  if (stdev < 3.0) return null;
+  // Empty slot backgrounds tend to be low contrast AND low saturation.
+  // Items tend to have either decent contrast or decent saturation.
+  return (stdevLum >= 8.0) || (meanSat >= 10.0);
+}
 
-  // Average-hash bits
+export function aHash64Center(img: ImageData): string {
+  const w = img.width, h = img.height;
+
+  const grid = 8;
+  const x0 = Math.floor(w * 0.20), x1 = Math.floor(w * 0.80);
+  const y0 = Math.floor(h * 0.20), y1 = Math.floor(h * 0.80);
+  const sw = Math.max(1, x1 - x0);
+  const sh = Math.max(1, y1 - y0);
+
+  const data = img.data;
+
+  const vals: number[] = new Array(grid * grid);
+  let sum = 0;
+
+  for (let gy = 0; gy < grid; gy++) {
+    for (let gx = 0; gx < grid; gx++) {
+      const x = Math.min(w - 1, x0 + Math.floor((gx + 0.5) * sw / grid));
+      const y = Math.min(h - 1, y0 + Math.floor((gy + 0.5) * sh / grid));
+      const i = (y * w + x) * 4;
+
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      const lum = (r * 0.299 + g * 0.587 + b * 0.114);
+      vals[gy * grid + gx] = lum;
+      sum += lum;
+    }
+  }
+
+  const mean = sum / vals.length;
+
   let bits = "";
-  for (let i = 0; i < n; i++) bits += vals[i] >= mean ? "1" : "0";
+  for (let i = 0; i < vals.length; i++) bits += vals[i] >= mean ? "1" : "0";
 
-  // Convert 64 bits -> 16 hex chars
   let hex = "";
   for (let i = 0; i < 64; i += 4) {
-    const nibble = bits.slice(i, i + 4);
-    hex += parseInt(nibble, 2).toString(16);
+    hex += parseInt(bits.slice(i, i + 4), 2).toString(16);
   }
 
   return hex;

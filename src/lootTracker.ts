@@ -1,47 +1,38 @@
 import { captureHoldFullRs } from "@alt1/base";
 import { readStackNumber, readMoneyGain } from "./ocr";
-import { aHash64 } from "./phash";
+import { aHash64Center, isLikelyItemIcon } from "./phash";
 import { AppState, LootEntry, Rect, Session } from "./storage";
 
 type RunState = "idle" | "running" | "paused";
-type SlotSnap = { sig: string | null; qty: number | null };
 
-function toImageData(ref: any): { img: ImageData | null; why: string } {
-  if (typeof ImageData !== "undefined" && ref instanceof ImageData) return { img: ref, why: "already ImageData" };
+type SlotSnap = {
+  sig: string | null;
+  qty: number | null;
 
-  try {
-    if (typeof ref?.toData === "function") {
-      const out = ref.toData();
-      if (out?.data && typeof out.width === "number" && typeof out.height === "number") return { img: out as ImageData, why: "toData()" };
-    }
-  } catch {}
+  // debounce: require stable sig twice before accepting
+  pendingSig: string | null;
+  pendingCount: number;
+};
 
-  try {
-    if (typeof ref?.getData === "function") {
-      const out = ref.getData();
-      if (out?.data && typeof out.width === "number" && typeof out.height === "number") return { img: out as ImageData, why: "getData()" };
-    }
-  } catch {}
+const ASSUME_STACK_CHANGE_IS_PLUS_ONE = true;
+
+function toImageData(ref: any): ImageData | null {
+  if (typeof ImageData !== "undefined" && ref instanceof ImageData) return ref;
+
+  try { if (typeof ref?.toData === "function") return ref.toData() as ImageData; } catch {}
+  try { if (typeof ref?.getData === "function") return ref.getData() as ImageData; } catch {}
 
   try {
     if (typeof ref?.read === "function") {
       const w = ref.width ?? ref.w;
       const h = ref.height ?? ref.h;
-      if (typeof w === "number" && typeof h === "number") {
-        const out = ref.read(0, 0, w, h);
-        if (out?.data && typeof out.width === "number" && typeof out.height === "number") return { img: out as ImageData, why: "read(0,0,w,h)" };
-      }
+      if (typeof w === "number" && typeof h === "number") return ref.read(0, 0, w, h) as ImageData;
     }
   } catch {}
 
-  try {
-    if (typeof ref?.read === "function") {
-      const out = ref.read();
-      if (out?.data && typeof out.width === "number" && typeof out.height === "number") return { img: out as ImageData, why: "read()" };
-    }
-  } catch {}
+  try { if (typeof ref?.read === "function") return ref.read() as ImageData; } catch {}
 
-  return { img: null, why: "No ImageData conversion method found (toData/getData/read)" };
+  return null;
 }
 
 function cropImageData(src: ImageData, x: number, y: number, w: number, h: number): ImageData {
@@ -76,8 +67,17 @@ export class LootTracker {
   private invRegion: Rect | null;
   private moneyRegion: Rect | null;
 
-  private slots: SlotSnap[] = Array.from({ length: 28 }, () => ({ sig: null, qty: null }));
+  private slots: SlotSnap[] = Array.from({ length: 28 }, () => ({
+    sig: null,
+    qty: null,
+    pendingSig: null,
+    pendingCount: 0,
+  }));
+
   private loot: Record<string, LootEntry> = {};
+
+  // icon pixels for UI display (not persisted)
+  private iconImgs: Map<string, ImageData> = new Map();
 
   private timer: number | null = null;
   private updateCb: (() => void) | null = null;
@@ -104,9 +104,14 @@ export class LootTracker {
     return Object.values(this.loot).sort((a, b) => b.qty - a.qty);
   }
 
+  getIconImageData(key: string): ImageData | null {
+    return this.iconImgs.get(key) ?? null;
+  }
+
   reset() {
     this.loot = {};
-    this.slots = this.slots.map(() => ({ sig: null, qty: null }));
+    this.iconImgs.clear();
+    this.slots = this.slots.map(() => ({ sig: null, qty: null, pendingSig: null, pendingCount: 0 }));
   }
 
   setInventoryRegion(r: Rect) {
@@ -124,9 +129,9 @@ export class LootTracker {
   captureFullImageData(): { img: ImageData | null; error: string | null } {
     const cap: any = captureHoldFullRs();
     if (!cap) return { img: null, error: "captureHoldFullRs() returned null" };
-    const conv = toImageData(cap);
-    if (!conv.img) return { img: null, error: conv.why };
-    return { img: conv.img, error: null };
+    const img = toImageData(cap);
+    if (!img) return { img: null, error: "Could not convert capture to ImageData" };
+    return { img, error: null };
   }
 
   previewRegionImageData(_kind: "inv" | "money", rect: Rect): { img: ImageData | null; error: string | null } {
@@ -141,7 +146,7 @@ export class LootTracker {
     this.runState = "running";
     this.reset();
 
-    // Baseline capture (do NOT count as loot)
+    // baseline (no loot)
     this.captureAndUpdate(true);
 
     if (this.timer) window.clearInterval(this.timer);
@@ -206,61 +211,119 @@ export class LootTracker {
       const sx = this.invRegion.x + col * slotW;
       const sy = this.invRegion.y + row * slotH;
 
-      const iconImg = cropImageData(frame, sx + 2, sy + Math.floor(slotH * 0.22), slotW - 4, slotH - 4);
-      const numImg = cropImageData(frame, sx + 1, sy + 1, Math.floor(slotW * 0.7), Math.floor(slotH * 0.4));
+      // icon crop: focus on icon itself, not the slot background
+      const iconImg = cropImageData(
+        frame,
+        sx + Math.floor(slotW * 0.18),
+        sy + Math.floor(slotH * 0.26),
+        Math.floor(slotW * 0.64),
+        Math.floor(slotH * 0.64)
+      );
 
-      const sig = aHash64(iconImg);               // ✅ now works on ImageData
-      const qty = readStackNumber(numImg);        // null for now
+      // number area (top-left) - OCR later
+      const numImg = cropImageData(
+        frame,
+        sx + 1,
+        sy + 1,
+        Math.floor(slotW * 0.70),
+        Math.floor(slotH * 0.38)
+      );
 
-      this.applySlotUpdate(i, sig, qty, isBaseline);
+      // reject empty-ish slots & background shimmer
+      if (!isLikelyItemIcon(iconImg)) {
+        this.applySlotUpdate(i, null, null, isBaseline, null);
+        continue;
+      }
+
+      const sig = aHash64Center(iconImg);
+      const qty = readStackNumber(numImg);
+
+      this.applySlotUpdate(i, sig, qty, isBaseline, iconImg);
     }
 
-    // Money gain later (OCR not implemented yet)
     if (!isBaseline && this.moneyRegion) {
       const moneyImg = cropImageData(frame, this.moneyRegion.x, this.moneyRegion.y, this.moneyRegion.w, this.moneyRegion.h);
       const gain = readMoneyGain(moneyImg);
-      if (gain) this.addLoot("coins:pouch", "Coins (Money Pouch)", gain);
+      if (gain) this.addLoot("coins:pouch", "Coins (Money Pouch)", gain, null);
     }
 
     this.updateCb?.();
   }
 
-  private applySlotUpdate(i: number, sig: string | null, qty: number | null, isBaseline: boolean) {
+  private applySlotUpdate(i: number, sig: string | null, qty: number | null, isBaseline: boolean, iconImg: ImageData | null) {
     const slot = this.slots[i];
+
+    // baseline: just set stable state
+    if (isBaseline) {
+      slot.sig = sig;
+      slot.qty = qty;
+      slot.pendingSig = null;
+      slot.pendingCount = 0;
+      return;
+    }
+
+    // empty -> clear pending & stable
+    if (!sig) {
+      slot.sig = null;
+      slot.qty = null;
+      slot.pendingSig = null;
+      slot.pendingCount = 0;
+      return;
+    }
+
+    // debounce: require same sig twice before accepting as "real"
+    if (slot.pendingSig !== sig) {
+      slot.pendingSig = sig;
+      slot.pendingCount = 1;
+      return;
+    } else {
+      slot.pendingCount++;
+      if (slot.pendingCount < 2) return;
+    }
+
+    // now accept the pending sig
+    slot.pendingSig = null;
+    slot.pendingCount = 0;
 
     const prevSig = slot.sig;
     const prevQty = slot.qty;
 
-    // update snapshot
     slot.sig = sig;
     slot.qty = qty;
 
-    if (isBaseline) return;
+    // store icon image once we know this is “real”
+    if (iconImg && !this.iconImgs.has(sig)) {
+      this.iconImgs.set(sig, iconImg);
+    }
 
-    // empty slot -> ignore
-    if (!sig) return;
-
-    // If we can't read stack numbers yet:
-    // Count NEW item appearing in slot as +1
+    // --- Quantity logic
     if (qty === null) {
+      // No OCR yet.
       if (prevSig !== sig) {
-        this.addLoot(sig, this.displayName(sig), 1);
+        // brand new item in that slot
+        this.addLoot(sig, this.displayName(sig), 1, iconImg);
+      } else {
+        // same item, stack changed: treat as +1 (better than “just changed”)
+        if (ASSUME_STACK_CHANGE_IS_PLUS_ONE) this.addLoot(sig, this.displayName(sig), 1, iconImg);
       }
       return;
     }
 
-    // If we *can* read stack numbers (future):
+    // If OCR works later:
     if (prevSig !== sig || prevQty === null) {
-      this.addLoot(sig, this.displayName(sig), qty);
+      this.addLoot(sig, this.displayName(sig), qty, iconImg);
       return;
     }
-    if (qty > prevQty) this.addLoot(sig, this.displayName(sig), qty - prevQty);
+    if (qty > prevQty) this.addLoot(sig, this.displayName(sig), qty - prevQty, iconImg);
   }
 
-  private addLoot(key: string, name: string, qty: number) {
+  private addLoot(key: string, name: string, qty: number, iconImg: ImageData | null) {
     if (qty <= 0) return;
+
     if (!this.loot[key]) this.loot[key] = { key, name, qty: 0, iconSig: key };
     this.loot[key].qty += qty;
+
+    if (iconImg && !this.iconImgs.has(key)) this.iconImgs.set(key, iconImg);
 
     if (this.state.activeSession) this.state.activeSession.loot = this.getCurrentLoot();
   }

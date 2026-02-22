@@ -5,45 +5,68 @@ export function setText(id: string, text: string) {
   if (el) el.textContent = text;
 }
 
-export function renderLootTable(entries: LootEntry[], state: AppState) {
-  const tbody = document.getElementById("lootRows") as HTMLTableSectionElement;
-  tbody.innerHTML = "";
+export function renderLootTable(
+  loot: LootEntry[],
+  _state: AppState,
+  getIcon?: (key: string) => ImageData | null
+) {
+  const body = document.getElementById("lootRows");
+  if (!body) return;
+  body.innerHTML = "";
 
-  for (const e of entries) {
+  for (const entry of loot) {
     const tr = document.createElement("tr");
-    tr.dataset.sig = e.iconSig ?? "";
 
+    // icon cell (canvas)
     const tdIcon = document.createElement("td");
-    if (e.iconSig) {
-      const img = document.createElement("img");
-      img.className = "loot-icon";
-      img.alt = e.name;
-      img.dataset.sig = e.iconSig;
-      // src is filled by wireClickRename() once we can ask tracker for data URLs
-      tdIcon.appendChild(img);
-    } else {
-      tdIcon.textContent = "—";
+    tdIcon.style.width = "42px";
+
+    const cnv = document.createElement("canvas");
+    cnv.width = 32;
+    cnv.height = 32;
+    cnv.style.width = "32px";
+    cnv.style.height = "32px";
+    cnv.style.borderRadius = "6px";
+    cnv.style.border = "1px solid #222635";
+    cnv.style.background = "#0b0c10";
+    cnv.style.imageRendering = "pixelated";
+    tdIcon.appendChild(cnv);
+
+    const img = getIcon ? getIcon(entry.key) : null;
+    if (img) {
+      try {
+        cnv.width = img.width;
+        cnv.height = img.height;
+        const ctx = cnv.getContext("2d");
+        if (ctx) ctx.putImageData(img, 0, 0);
+      } catch {
+        // ignore draw errors
+      }
     }
 
+    // name cell
     const tdName = document.createElement("td");
-    tdName.textContent = e.name;
+    tdName.textContent = entry.name;
 
+    // qty cell
     const tdQty = document.createElement("td");
-    tdQty.className = "right";
-    tdQty.textContent = e.qty.toLocaleString();
+    tdQty.textContent = String(entry.qty);
+    tdQty.style.textAlign = "right";
 
     tr.appendChild(tdIcon);
     tr.appendChild(tdName);
     tr.appendChild(tdQty);
-    tbody.appendChild(tr);
+
+    body.appendChild(tr);
   }
 }
 
 export function renderSessionTable(sessions: Session[]) {
-  const tbody = document.getElementById("sessionRows") as HTMLTableSectionElement;
-  tbody.innerHTML = "";
+  const body = document.getElementById("sessionRows");
+  if (!body) return;
+  body.innerHTML = "";
 
-  for (const s of sessions.slice(0, 20)) {
+  for (const s of sessions) {
     const tr = document.createElement("tr");
 
     const tdWhen = document.createElement("td");
@@ -53,42 +76,13 @@ export function renderSessionTable(sessions: Session[]) {
     tdLabel.textContent = s.label;
 
     const tdCount = document.createElement("td");
-    tdCount.className = "right";
-    tdCount.textContent = String(s.loot.length);
+    tdCount.style.textAlign = "right";
+    tdCount.textContent = String(s.loot?.length ?? 0);
 
     tr.appendChild(tdWhen);
     tr.appendChild(tdLabel);
     tr.appendChild(tdCount);
-    tbody.appendChild(tr);
+
+    body.appendChild(tr);
   }
-}
-
-/**
- * Allows clicking an inventory-based loot row to name it once.
- * Also fills in icon <img src> from tracker callback.
- */
-export function wireClickRename(state: AppState, getIconUrl: (sig: string) => string | null) {
-  // Fill icons
-  document.querySelectorAll<HTMLImageElement>("img.loot-icon").forEach((img) => {
-    const sig = img.dataset.sig;
-    if (!sig) return;
-    const url = getIconUrl(sig);
-    if (url) img.src = url;
-  });
-
-  // Click to rename
-  const tbody = document.getElementById("lootRows");
-  if (!tbody) return;
-
-  tbody.onclick = (ev) => {
-    const tr = (ev.target as HTMLElement).closest("tr");
-    if (!tr) return;
-    const sig = tr.dataset.sig;
-    if (!sig) return;
-
-    const existing = state.iconNames[sig] ?? "";
-    const name = prompt("Name this item (stored locally):", existing);
-    if (!name) return;
-    state.iconNames[sig] = name.trim();
-  };
 }
