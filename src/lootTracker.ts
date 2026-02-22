@@ -1,6 +1,6 @@
 import { captureHoldFullRs } from "@alt1/base";
 import { readStackNumber, readMoneyGain } from "./ocr";
-import { aHash64Center, isLikelyItemIcon } from "./phash";
+import { aHash64IgnoreTopLeft, isLikelyItemIcon } from "./phash";
 import { AppState, LootEntry, Rect, Session } from "./storage";
 
 type RunState = "idle" | "running" | "paused";
@@ -9,19 +9,14 @@ type SlotSnap = {
   sig: string | null;
   qty: number | null;
 
-  // debounce: require stable sig twice before accepting
   pendingSig: string | null;
   pendingCount: number;
 };
 
-const ASSUME_STACK_CHANGE_IS_PLUS_ONE = true;
-
 function toImageData(ref: any): ImageData | null {
   if (typeof ImageData !== "undefined" && ref instanceof ImageData) return ref;
-
   try { if (typeof ref?.toData === "function") return ref.toData() as ImageData; } catch {}
   try { if (typeof ref?.getData === "function") return ref.getData() as ImageData; } catch {}
-
   try {
     if (typeof ref?.read === "function") {
       const w = ref.width ?? ref.w;
@@ -29,9 +24,7 @@ function toImageData(ref: any): ImageData | null {
       if (typeof w === "number" && typeof h === "number") return ref.read(0, 0, w, h) as ImageData;
     }
   } catch {}
-
   try { if (typeof ref?.read === "function") return ref.read() as ImageData; } catch {}
-
   return null;
 }
 
@@ -60,6 +53,20 @@ function cropImageData(src: ImageData, x: number, y: number, w: number, h: numbe
   return out;
 }
 
+/**
+ * For display + more stable hashing, we crop a slightly “lower-right” region
+ * to avoid the stack-count overlay in the upper-left.
+ */
+function iconForHashAndDisplay(iconImg: ImageData): ImageData {
+  const w = iconImg.width, h = iconImg.height;
+  // crop from ~22%..100% (cuts away top-left)
+  const x = Math.floor(w * 0.22);
+  const y = Math.floor(h * 0.22);
+  const cw = Math.max(1, w - x);
+  const ch = Math.max(1, h - y);
+  return cropImageData(iconImg, x, y, cw, ch);
+}
+
 export class LootTracker {
   private state: AppState;
   private runState: RunState = "idle";
@@ -75,8 +82,6 @@ export class LootTracker {
   }));
 
   private loot: Record<string, LootEntry> = {};
-
-  // icon pixels for UI display (not persisted)
   private iconImgs: Map<string, ImageData> = new Map();
 
   private timer: number | null = null;
@@ -146,7 +151,6 @@ export class LootTracker {
     this.runState = "running";
     this.reset();
 
-    // baseline (no loot)
     this.captureAndUpdate(true);
 
     if (this.timer) window.clearInterval(this.timer);
@@ -211,7 +215,7 @@ export class LootTracker {
       const sx = this.invRegion.x + col * slotW;
       const sy = this.invRegion.y + row * slotH;
 
-      // icon crop: focus on icon itself, not the slot background
+      // icon crop (center-ish)
       const iconImg = cropImageData(
         frame,
         sx + Math.floor(slotW * 0.18),
@@ -220,7 +224,7 @@ export class LootTracker {
         Math.floor(slotH * 0.64)
       );
 
-      // number area (top-left) - OCR later
+      // number crop (future OCR)
       const numImg = cropImageData(
         frame,
         sx + 1,
@@ -229,16 +233,17 @@ export class LootTracker {
         Math.floor(slotH * 0.38)
       );
 
-      // reject empty-ish slots & background shimmer
       if (!isLikelyItemIcon(iconImg)) {
         this.applySlotUpdate(i, null, null, isBaseline, null);
         continue;
       }
 
-      const sig = aHash64Center(iconImg);
+      // Avoid top-left overlay for hash+display
+      const stableIcon = iconForHashAndDisplay(iconImg);
+      const sig = aHash64IgnoreTopLeft(stableIcon);
       const qty = readStackNumber(numImg);
 
-      this.applySlotUpdate(i, sig, qty, isBaseline, iconImg);
+      this.applySlotUpdate(i, sig, qty, isBaseline, stableIcon);
     }
 
     if (!isBaseline && this.moneyRegion) {
@@ -253,7 +258,6 @@ export class LootTracker {
   private applySlotUpdate(i: number, sig: string | null, qty: number | null, isBaseline: boolean, iconImg: ImageData | null) {
     const slot = this.slots[i];
 
-    // baseline: just set stable state
     if (isBaseline) {
       slot.sig = sig;
       slot.qty = qty;
@@ -262,7 +266,6 @@ export class LootTracker {
       return;
     }
 
-    // empty -> clear pending & stable
     if (!sig) {
       slot.sig = null;
       slot.qty = null;
@@ -271,7 +274,7 @@ export class LootTracker {
       return;
     }
 
-    // debounce: require same sig twice before accepting as "real"
+    // debounce: require 2 consecutive frames with same sig
     if (slot.pendingSig !== sig) {
       slot.pendingSig = sig;
       slot.pendingCount = 1;
@@ -281,7 +284,6 @@ export class LootTracker {
       if (slot.pendingCount < 2) return;
     }
 
-    // now accept the pending sig
     slot.pendingSig = null;
     slot.pendingCount = 0;
 
@@ -291,21 +293,11 @@ export class LootTracker {
     slot.sig = sig;
     slot.qty = qty;
 
-    // store icon image once we know this is “real”
-    if (iconImg && !this.iconImgs.has(sig)) {
-      this.iconImgs.set(sig, iconImg);
-    }
+    if (iconImg && !this.iconImgs.has(sig)) this.iconImgs.set(sig, iconImg);
 
-    // --- Quantity logic
+    // ✅ No OCR yet: ONLY record when item CHANGES (prevents duplicates from count overlay)
     if (qty === null) {
-      // No OCR yet.
-      if (prevSig !== sig) {
-        // brand new item in that slot
-        this.addLoot(sig, this.displayName(sig), 1, iconImg);
-      } else {
-        // same item, stack changed: treat as +1 (better than “just changed”)
-        if (ASSUME_STACK_CHANGE_IS_PLUS_ONE) this.addLoot(sig, this.displayName(sig), 1, iconImg);
-      }
+      if (prevSig !== sig) this.addLoot(sig, this.displayName(sig), 1, iconImg);
       return;
     }
 
