@@ -19,11 +19,21 @@ function promptRect(title: string, existing: Rect | null): Rect | null {
   return { x, y, w, h };
 }
 
-function mixColorSafe(r: number, g: number, b: number): number {
-  const a1lib: any = (window as any).a1lib;
-  if (a1lib?.mixColor) return a1lib.mixColor(r, g, b);
-  // Fallback (may still work depending on build)
-  return 0xffffffff;
+function imgRefToDataUrl(ref: any): string | null {
+  // Try a few common runtime methods (typings vary a lot in Alt1 alphas).
+  try {
+    if (typeof ref?.toPngDataUrl === "function") return ref.toPngDataUrl();
+  } catch {}
+  try {
+    if (typeof ref?.toDataURL === "function") return ref.toDataURL();
+  } catch {}
+  try {
+    // Sometimes: ref.toData() returns ImageData-like which can be drawn to canvas,
+    // but we keep this simple and just return null if not directly supported.
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export class LootTracker {
@@ -38,8 +48,6 @@ export class LootTracker {
 
   private timer: number | null = null;
   private updateCb: (() => void) | null = null;
-
-  private readonly overlayGroup = "loottracker_preview";
 
   constructor(state: AppState) {
     this.state = state;
@@ -62,6 +70,12 @@ export class LootTracker {
     this.slots = this.slots.map(() => ({ sig: null, qty: null }));
   }
 
+  getDiagLine(): string {
+    const alt1: any = (window as any).alt1;
+    if (!alt1) return "alt1: not detected";
+    return `alt1 ok | pixel=${!!alt1.permissionPixel} overlay=${!!alt1.permissionOverlay} rsLinked=${!!alt1.rsLinked}`;
+  }
+
   setInventoryRegion(r: Rect) {
     this.invRegion = r;
     this.state.settings.invRegion = r;
@@ -74,85 +88,29 @@ export class LootTracker {
     this.updateCb?.();
   }
 
-  // --- Overlay helpers (screen coords!) ---
-  private rsClientToScreen(r: Rect): Rect {
-    const alt1: any = (window as any).alt1;
-    if (alt1?.rsLinked) {
-      return { x: r.x + (alt1.rsX ?? 0), y: r.y + (alt1.rsY ?? 0), w: r.w, h: r.h };
-    }
-    return r; // best effort
-  }
-
-  clearOverlay() {
-    const alt1: any = (window as any).alt1;
-    if (!alt1?.overLayClearGroup) {
-      alert("Overlay API not available. Make sure the app has Overlay permission.");
-      return;
-    }
-    alt1.overLayClearGroup(this.overlayGroup); // group-based clearing :contentReference[oaicite:1]{index=1}
-  }
-
-  previewRect(r: Rect) {
-    const alt1: any = (window as any).alt1;
-    if (!alt1?.overLayRect || !alt1?.overLaySetGroup || !alt1?.overLayText) {
-      alert("Overlay API not available. Enable Overlay permission for this app in Alt1 Settings → Apps.");
-      return;
-    }
-
-    // Diagnostic info so we can tell if rs is linked / coords are sane
-    const info =
-      `OverlayPerm=${alt1.permissionOverlay} PixelPerm=${alt1.permissionPixel} ` +
-      `rsLinked=${alt1.rsLinked} rsX=${alt1.rsX} rsY=${alt1.rsY}`;
-
-    alt1.overLaySetGroup(this.overlayGroup);
-
-    const yellow = mixColorSafe(255, 255, 0);
-    const white = mixColorSafe(255, 255, 255);
-
-    // Draw a very obvious test marker near the RS client top-left (screen space)
-    if (alt1.rsLinked) {
-      alt1.overLayRect(white, alt1.rsX + 10, alt1.rsY + 10, 220, 80, 3000, 3);
-      alt1.overLayText("LootTracker overlay TEST", white, 14, alt1.rsX + 16, alt1.rsY + 16, 3000);
-    } else {
-      // If RS not linked, draw in global screen coords so you can still see *something*
-      alt1.overLayRect(white, (alt1.screenX ?? 0) + 20, (alt1.screenY ?? 0) + 20, 260, 90, 3000, 3);
-      alt1.overLayText("Overlay TEST (RS not linked)", white, 14, (alt1.screenX ?? 0) + 28, (alt1.screenY ?? 0) + 28, 3000);
-    }
-
-    // Now draw the requested preview rect, converted to screen coords
-    const sr = this.rsClientToScreen(r);
-
-    // Correct signature: overLayRect(color, x, y, w, h, timeMs, lineWidth) :contentReference[oaicite:2]{index=2}
-    const ok = alt1.overLayRect(yellow, sr.x, sr.y, sr.w, sr.h, 3000, 2);
-    alt1.overLayText(ok ? "Preview OK" : "Preview FAILED", yellow, 14, sr.x + 6, sr.y + 6, 3000);
-
-    if (ok === false) {
-      alert(
-        "Alt1 returned false from overLayRect.\n\n" +
-        info +
-        "\n\nCommon fixes:\n" +
-        "• Run Alt1 as Administrator\n" +
-        "• Avoid exclusive fullscreen; use Windowed/Borderless\n" +
-        "• Disable conflicting overlays (Xbox Game Bar / Steam / OBS)\n"
-      );
-    } else {
-      console.log("Overlay preview:", { inputRect: r, screenRect: sr, info });
-    }
-  }
-
-  // Manual “calibrate” prompts (no Alt+1 dependency)
   async calibrateInventoryRegion(): Promise<boolean> {
-    const r = promptRect("Calibrate Inventory Region", this.invRegion);
+    const r = promptRect("Set Inventory Region", this.invRegion);
     if (!r) return false;
     this.setInventoryRegion(r);
     return true;
   }
 
   async calibrateMoneyRegion(): Promise<boolean> {
-    const r = promptRect("Calibrate Money Gain Region", this.moneyRegion);
+    const r = promptRect("Set Money Region", this.moneyRegion);
     if (!r) return false;
     this.setMoneyRegion(r);
     return true;
+  }
+
+  previewRegion(kind: "inv" | "money", override?: Rect): string | null {
+    const r = override ?? (kind === "inv" ? this.invRegion : this.moneyRegion);
+    if (!r) return null;
+
+    const img: any = captureHoldFullRs();
+    if (!img || typeof img.crop !== "function") return null;
+
+    const crop = img.crop(r.x, r.y, r.w, r.h);
+    return imgRefToDataUrl(crop);
   }
 
   start(label: string) {
@@ -161,8 +119,10 @@ export class LootTracker {
     this.runState = "running";
     this.reset();
 
+    // baseline
     this.captureAndUpdate(true);
 
+    // loop
     if (this.timer) window.clearInterval(this.timer);
     this.timer = window.setInterval(() => {
       if (this.runState !== "running") return;

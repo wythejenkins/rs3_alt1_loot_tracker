@@ -22,20 +22,24 @@
       .card { border: 1px solid #222635; background:#11131b; border-radius: 12px; padding: 10px; }
       .right { text-align:right; }
       .small { width: 74px; }
+      .previews { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; }
+      .previewBox { border:1px solid #222635; border-radius: 10px; padding: 8px; background:#0f1118; }
+      .previewImg { width: 100%; height: 220px; object-fit: contain; background:#0b0c10; border-radius: 8px; border:1px solid #222635; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
     </style>
   </head>
   <body>
     <h1>Alt1 Loot Tracker (Inventory Diff)</h1>
 
     <div class="row">
-      <button id="btnCalibInv">Calibrate Inventory Region (manual prompt)</button>
-      <button id="btnCalibMoney">Calibrate Money Gain Region (manual prompt)</button>
+      <button id="btnCalibInv">Set Inventory Region (prompt x,y,w,h)</button>
+      <button id="btnCalibMoney">Set Money Region (prompt x,y,w,h)</button>
       <span class="pill" id="statusInv">Inventory: not set</span>
       <span class="pill" id="statusMoney">Money: not set</span>
     </div>
 
     <div class="card" style="margin-bottom:12px;">
-      <div class="muted">Manual regions (x,y,w,h in RS client pixels). Use Preview to draw an overlay rectangle on the game.</div>
+      <div class="muted">Manual regions (x,y,w,h in RS client pixels). Use “Preview in app” to verify cropping (no Alt1 overlay required).</div>
 
       <div class="row" style="margin-top:8px;">
         <span class="pill">Inventory</span>
@@ -44,7 +48,7 @@
         <input id="invW" class="small" placeholder="w" />
         <input id="invH" class="small" placeholder="h" />
         <button id="btnSetInv">Set</button>
-        <button id="btnPreviewInv">Preview</button>
+        <button id="btnPreviewInv">Preview in app</button>
       </div>
 
       <div class="row">
@@ -54,12 +58,22 @@
         <input id="monW" class="small" placeholder="w" />
         <input id="monH" class="small" placeholder="h" />
         <button id="btnSetMoney">Set</button>
-        <button id="btnPreviewMoney">Preview</button>
+        <button id="btnPreviewMoney">Preview in app</button>
       </div>
 
       <div class="row">
-        <button id="btnClearOverlay">Clear Overlay</button>
-        <span class="muted">If Preview does nothing, enable Overlay permission for the app in Alt1.</span>
+        <span class="pill mono" id="diag"></span>
+      </div>
+    </div>
+
+    <div class="previews">
+      <div class="previewBox">
+        <div class="muted">Inventory preview</div>
+        <img id="imgInv" class="previewImg" alt="Inventory preview" />
+      </div>
+      <div class="previewBox">
+        <div class="muted">Money preview</div>
+        <img id="imgMoney" class="previewImg" alt="Money preview" />
       </div>
     </div>
 
@@ -103,6 +117,6 @@
       </div>
     </div>
 
-    <script src="/bundle.js?v=20260222b"></script>
+    <script src="/bundle.js"></script>
   </body>
 </html>

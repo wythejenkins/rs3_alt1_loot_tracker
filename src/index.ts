@@ -14,7 +14,8 @@ const btnPreviewInv = document.getElementById("btnPreviewInv") as HTMLButtonElem
 const btnSetMoney = document.getElementById("btnSetMoney") as HTMLButtonElement;
 const btnPreviewMoney = document.getElementById("btnPreviewMoney") as HTMLButtonElement;
 
-const btnClearOverlay = document.getElementById("btnClearOverlay") as HTMLButtonElement;
+const imgInv = document.getElementById("imgInv") as HTMLImageElement;
+const imgMoney = document.getElementById("imgMoney") as HTMLImageElement;
 
 const btnStart = document.getElementById("btnStart") as HTMLButtonElement;
 const btnPause = document.getElementById("btnPause") as HTMLButtonElement;
@@ -52,6 +53,7 @@ function refreshUI() {
   setText("statusInv", tracker.hasInventoryRegion() ? "Inventory: set" : "Inventory: not set");
   setText("statusMoney", tracker.hasMoneyRegion() ? "Money: set" : "Money: not set");
   setText("statusRun", `Status: ${tracker.getRunState()}`);
+  setText("diag", tracker.getDiagLine());
 
   btnStart.disabled = tracker.getRunState() !== "idle";
   btnPause.disabled = tracker.getRunState() === "idle";
@@ -61,6 +63,15 @@ function refreshUI() {
   renderSessionTable(state.sessions);
 
   saveAppState(state);
+}
+
+function setPreview(imgEl: HTMLImageElement, dataUrl: string | null) {
+  if (!dataUrl) {
+    imgEl.removeAttribute("src");
+    imgEl.alt = "Preview unavailable (no data URL method found)";
+    return;
+  }
+  imgEl.src = dataUrl;
 }
 
 btnCalibInv.onclick = async () => {
@@ -87,7 +98,7 @@ btnSetInv.onclick = () => {
 btnPreviewInv.onclick = () => {
   const r = readRect("inv");
   if (!r) return alert("Invalid inventory rect.");
-  tracker.previewRect(r);
+  setPreview(imgInv, tracker.previewRegion("inv", r));
 };
 
 btnSetMoney.onclick = () => {
@@ -100,11 +111,7 @@ btnSetMoney.onclick = () => {
 btnPreviewMoney.onclick = () => {
   const r = readRect("mon");
   if (!r) return alert("Invalid money rect.");
-  tracker.previewRect(r);
-};
-
-btnClearOverlay.onclick = () => {
-  tracker.clearOverlay();
+  setPreview(imgMoney, tracker.previewRegion("money", r));
 };
 
 btnStart.onclick = () => {
