@@ -1,32 +1,67 @@
-import { Rect } from "./storage";
+// src/alt1region.ts
+export type Rect = { x: number; y: number; w: number; h: number };
+
+type Point = { x: number; y: number };
+
+// One pending point per region "channel"
+const pending: Record<string, Point | null> = {
+  inventory: null,
+  money: null
+};
+
+function getMouseInRsClient(): Point | null {
+  const alt1: any = (window as any).alt1;
+  if (!alt1) return null;
+
+  // Requires Gamestate permission (see alt1.helpFull output).
+  const packed = alt1.mousePosition;
+  if (typeof packed !== "number") return null;
+
+  const x = (packed >> 16) & 0xffff;
+  const y = packed & 0xffff;
+
+  // Some builds return 0 when not available
+  if (x === 0 && y === 0) return null;
+
+  return { x, y };
+}
 
 /**
- * Reads the last Alt1 “captured region”.
- *
- * In most Alt1 apps: user uses Alt1’s capture tool and presses Alt+1,
- * then the app can read that region.
- *
- * If this doesn’t work in your environment, this is the only file you should need to adapt.
+ * Two-click calibration using current mouse position inside RS.
+ * Call twice:
+ *  1) hover top-left, click
+ *  2) hover bottom-right, click
  */
-export async function getRegionFromAlt1(): Promise<Rect | null> {
-  const alt1Any = (window as any).alt1;
-  if (!alt1Any) return null;
-
-  // Common patterns seen in Alt1 apps:
-  // - alt1.getRegion() returns {x,y,w,h}
-  // - alt1.getRegion() returns null if nothing captured
-  if (typeof alt1Any.getRegion === "function") {
-    const r = alt1Any.getRegion();
-    if (r && typeof r.x === "number") {
-      return { x: r.x, y: r.y, w: r.w, h: r.h };
-    }
+export async function getRegionFromAlt1(channel: "inventory" | "money"): Promise<Rect | null> {
+  const p = getMouseInRsClient();
+  if (!p) {
+    alert(
+      "Can't read RS mouse position.\n\n" +
+      "In Alt1 Settings > Apps > your Loot Tracker app:\n" +
+      "Enable Gamestate permission.\n" +
+      "Then try again with your mouse inside the RS game window."
+    );
+    return null;
   }
 
-  // Some builds store region differently; try a couple fallbacks.
-  if (alt1Any.lastRegion && typeof alt1Any.lastRegion.x === "number") {
-    const r = alt1Any.lastRegion;
-    return { x: r.x, y: r.y, w: r.w, h: r.h };
+  if (!pending[channel]) {
+    pending[channel] = p;
+    alert(
+      `Saved ${channel} TOP-LEFT.\n\nNow move your mouse to the BOTTOM-RIGHT corner of the ${channel} area and click the same calibrate button again.`
+    );
+    return null;
   }
 
-  return null;
+  const p1 = pending[channel]!;
+  pending[channel] = null;
+
+  const x1 = Math.min(p1.x, p.x);
+  const y1 = Math.min(p1.y, p.y);
+  const x2 = Math.max(p1.x, p.x);
+  const y2 = Math.max(p1.y, p.y);
+
+  const w = Math.max(1, x2 - x1);
+  const h = Math.max(1, y2 - y1);
+
+  return { x: x1, y: y1, w, h };
 }

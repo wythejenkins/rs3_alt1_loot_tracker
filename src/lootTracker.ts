@@ -52,20 +52,20 @@ export class LootTracker {
     this.slots = this.slots.map(()=>({sig:null,qty:null}));
   }
 
-  async calibrateInventoryRegion(){
-    const r = await getRegionFromAlt1();
-    if(!r) return false;
-    this.invRegion = r;
-    this.state.settings.invRegion = r;
-    return true;
+  async calibrateInventoryRegion(): Promise<boolean> {
+	const r = await getRegionFromAlt1("inventory");
+	if (!r) return false;
+	this.invRegion = r;
+	this.state.settings.invRegion = r;
+	return true;
   }
 
-  async calibrateMoneyRegion(){
-    const r = await getRegionFromAlt1();
-    if(!r) return false;
-    this.moneyRegion = r;
-    this.state.settings.moneyRegion = r;
-    return true;
+  async calibrateMoneyRegion(): Promise<boolean> {
+	const r = await getRegionFromAlt1("money");
+	if (!r) return false;
+	this.moneyRegion = r;
+	this.state.settings.moneyRegion = r;
+	return true;
   }
 
   start(label:string){
