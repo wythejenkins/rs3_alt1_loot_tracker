@@ -24,9 +24,7 @@ function drawImageData(canvas: HTMLCanvasElement, img: ImageData) {
 }
 
 function drawSelectionOverlay(canvas: HTMLCanvasElement, baseImg: ImageData, sel: Rect | null) {
-  // redraw base
   drawImageData(canvas, baseImg);
-
   if (!sel) return;
 
   const ctx = canvas.getContext("2d");
@@ -48,11 +46,9 @@ window.addEventListener("load", () => {
   const tracker = new LootTracker(state);
 
   const modePill = el<HTMLSpanElement>("modePill");
-
   const cnvFull = el<HTMLCanvasElement>("cnvFull");
   const cnvInv = el<HTMLCanvasElement>("cnvInv");
   const cnvMoney = el<HTMLCanvasElement>("cnvMoney");
-
   const sessionLabel = el<HTMLInputElement>("sessionLabel");
 
   let mode: Mode = "inv";
@@ -134,13 +130,12 @@ window.addEventListener("load", () => {
     el<HTMLButtonElement>("btnSaveSelection").disabled = true;
     el<HTMLButtonElement>("btnClearSelection").disabled = true;
 
-    refreshUI(`capture ok (${cap.why ?? "img"})`);
+    refreshUI("capture ok");
   };
 
   // --- Selection drawing on full canvas (image coordinates)
   function getCanvasPoint(evt: MouseEvent): { x: number; y: number } {
     const rect = cnvFull.getBoundingClientRect();
-    // Map CSS pixels -> canvas pixels
     const sx = cnvFull.width / rect.width;
     const sy = cnvFull.height / rect.height;
     return {
@@ -202,7 +197,7 @@ window.addEventListener("load", () => {
   el<HTMLButtonElement>("btnSaveSelection").onclick = () => {
     setLast("clicked: save selection");
     if (!selection) return refreshUI("no selection");
-    // selection is in RS client pixel coords (full capture coords)
+
     if (mode === "inv") {
       tracker.setInventoryRegion(selection);
       fillRectInputs("inv", selection);
@@ -232,7 +227,7 @@ window.addEventListener("load", () => {
     if (res.error || !res.img) return refreshUI(`inv preview: ${res.error}`);
 
     drawImageData(cnvInv, res.img);
-    refreshUI(`inv preview ok (${res.why ?? "img"})`);
+    refreshUI("inv preview ok");
   };
 
   el<HTMLButtonElement>("btnSetMoney").onclick = () => {
@@ -252,7 +247,7 @@ window.addEventListener("load", () => {
     if (res.error || !res.img) return refreshUI(`money preview: ${res.error}`);
 
     drawImageData(cnvMoney, res.img);
-    refreshUI(`money preview ok (${res.why ?? "img"})`);
+    refreshUI("money preview ok");
   };
 
   // --- Session controls
@@ -273,7 +268,6 @@ window.addEventListener("load", () => {
   };
   el<HTMLButtonElement>("btnClearAll").onclick = () => {
     setLast("clicked: clear all");
-    // confirm() may be blocked too; just do it.
     state.sessions = [];
     state.iconNames = {};
     tracker.reset();

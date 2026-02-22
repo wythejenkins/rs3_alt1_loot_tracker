@@ -44,11 +44,7 @@ function toImageData(ref: any): { img: ImageData | null; why: string } {
   return { img: null, why: "No ImageData conversion method found (toData/getData/read)" };
 }
 
-/**
- * Fast manual crop from ImageData (no canvas needed).
- */
 function cropImageData(src: ImageData, x: number, y: number, w: number, h: number): ImageData {
-  // clamp to bounds
   const x0 = Math.max(0, Math.min(src.width - 1, Math.floor(x)));
   const y0 = Math.max(0, Math.min(src.height - 1, Math.floor(y)));
   const x1 = Math.max(0, Math.min(src.width, Math.floor(x0 + w)));
@@ -125,20 +121,18 @@ export class LootTracker {
     this.updateCb?.();
   }
 
-  captureFullImageData(): { img: ImageData | null; error: string | null; why?: string } {
+  captureFullImageData(): { img: ImageData | null; error: string | null } {
     const cap: any = captureHoldFullRs();
     if (!cap) return { img: null, error: "captureHoldFullRs() returned null" };
     const conv = toImageData(cap);
     if (!conv.img) return { img: null, error: conv.why };
-    return { img: conv.img, error: null, why: conv.why };
+    return { img: conv.img, error: null };
   }
 
-  previewRegionImageData(kind: "inv" | "money", rect: Rect): { img: ImageData | null; error: string | null; why?: string } {
+  previewRegionImageData(_kind: "inv" | "money", rect: Rect): { img: ImageData | null; error: string | null } {
     const full = this.captureFullImageData();
-    if (full.error || !full.img) return { img: null, error: full.error, why: full.why };
-
-    const cropped = cropImageData(full.img, rect.x, rect.y, rect.w, rect.h);
-    return { img: cropped, error: null, why: `manual crop (${full.why ?? "img"})` };
+    if (full.error || !full.img) return { img: null, error: full.error };
+    return { img: cropImageData(full.img, rect.x, rect.y, rect.w, rect.h), error: null };
   }
 
   start(label: string) {
@@ -146,13 +140,15 @@ export class LootTracker {
 
     this.runState = "running";
     this.reset();
+
+    // Baseline capture (do NOT count as loot)
     this.captureAndUpdate(true);
 
     if (this.timer) window.clearInterval(this.timer);
     this.timer = window.setInterval(() => {
       if (this.runState !== "running") return;
       this.captureAndUpdate(false);
-    }, 600);
+    }, 650);
 
     this.state.activeSession = {
       id: crypto.randomUUID(),
@@ -210,28 +206,16 @@ export class LootTracker {
       const sx = this.invRegion.x + col * slotW;
       const sy = this.invRegion.y + row * slotH;
 
-      const iconImg = cropImageData(
-        frame,
-        sx + 2,
-        sy + Math.floor(slotH * 0.22),
-        slotW - 4,
-        slotH - 4
-      );
+      const iconImg = cropImageData(frame, sx + 2, sy + Math.floor(slotH * 0.22), slotW - 4, slotH - 4);
+      const numImg = cropImageData(frame, sx + 1, sy + 1, Math.floor(slotW * 0.7), Math.floor(slotH * 0.4));
 
-      const numImg = cropImageData(
-        frame,
-        sx + 1,
-        sy + 1,
-        Math.floor(slotW * 0.7),
-        Math.floor(slotH * 0.4)
-      );
-
-      const sig = aHash64(iconImg);
-      const qty = readStackNumber(numImg);
+      const sig = aHash64(iconImg);               // ✅ now works on ImageData
+      const qty = readStackNumber(numImg);        // null for now
 
       this.applySlotUpdate(i, sig, qty, isBaseline);
     }
 
+    // Money gain later (OCR not implemented yet)
     if (!isBaseline && this.moneyRegion) {
       const moneyImg = cropImageData(frame, this.moneyRegion.x, this.moneyRegion.y, this.moneyRegion.w, this.moneyRegion.h);
       const gain = readMoneyGain(moneyImg);
@@ -243,21 +227,33 @@ export class LootTracker {
 
   private applySlotUpdate(i: number, sig: string | null, qty: number | null, isBaseline: boolean) {
     const slot = this.slots[i];
-    if (!sig || qty === null) return;
 
     const prevSig = slot.sig;
     const prevQty = slot.qty;
 
+    // update snapshot
     slot.sig = sig;
     slot.qty = qty;
 
     if (isBaseline) return;
 
+    // empty slot -> ignore
+    if (!sig) return;
+
+    // If we can't read stack numbers yet:
+    // Count NEW item appearing in slot as +1
+    if (qty === null) {
+      if (prevSig !== sig) {
+        this.addLoot(sig, this.displayName(sig), 1);
+      }
+      return;
+    }
+
+    // If we *can* read stack numbers (future):
     if (prevSig !== sig || prevQty === null) {
       this.addLoot(sig, this.displayName(sig), qty);
       return;
     }
-
     if (qty > prevQty) this.addLoot(sig, this.displayName(sig), qty - prevQty);
   }
 
@@ -265,6 +261,7 @@ export class LootTracker {
     if (qty <= 0) return;
     if (!this.loot[key]) this.loot[key] = { key, name, qty: 0, iconSig: key };
     this.loot[key].qty += qty;
+
     if (this.state.activeSession) this.state.activeSession.loot = this.getCurrentLoot();
   }
 
