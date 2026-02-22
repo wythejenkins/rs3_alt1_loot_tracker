@@ -1,6 +1,6 @@
 import { captureHoldFullRs } from "@alt1/base";
 import { readStackNumber, readMoneyGain } from "./ocr";
-import { aHash64IgnoreTopLeft, isLikelyItemIcon } from "./phash";
+import { aHash64IgnoreTopLeft, isLikelyItemIcon, isLikelyHoverOverlay, hamming64hex } from "./phash";
 import { AppState, LootEntry, Rect, Session } from "./storage";
 
 type RunState = "idle" | "running" | "paused";
@@ -8,10 +8,11 @@ type RunState = "idle" | "running" | "paused";
 type SlotSnap = {
   sig: string | null;
   qty: number | null;
-
   pendingSig: string | null;
   pendingCount: number;
 };
+
+const HAMMING_SAME_ITEM_MAX = 8;
 
 function toImageData(ref: any): ImageData | null {
   if (typeof ImageData !== "undefined" && ref instanceof ImageData) return ref;
@@ -53,13 +54,8 @@ function cropImageData(src: ImageData, x: number, y: number, w: number, h: numbe
   return out;
 }
 
-/**
- * For display + more stable hashing, we crop a slightly “lower-right” region
- * to avoid the stack-count overlay in the upper-left.
- */
 function iconForHashAndDisplay(iconImg: ImageData): ImageData {
   const w = iconImg.width, h = iconImg.height;
-  // crop from ~22%..100% (cuts away top-left)
   const x = Math.floor(w * 0.22);
   const y = Math.floor(h * 0.22);
   const cw = Math.max(1, w - x);
@@ -215,7 +211,6 @@ export class LootTracker {
       const sx = this.invRegion.x + col * slotW;
       const sy = this.invRegion.y + row * slotH;
 
-      // icon crop (center-ish)
       const iconImg = cropImageData(
         frame,
         sx + Math.floor(slotW * 0.18),
@@ -224,7 +219,11 @@ export class LootTracker {
         Math.floor(slotH * 0.64)
       );
 
-      // number crop (future OCR)
+      // If tooltip/hover overlay is likely covering this slot, ignore this frame for this slot.
+      if (isLikelyHoverOverlay(iconImg)) {
+        continue;
+      }
+
       const numImg = cropImageData(
         frame,
         sx + 1,
@@ -238,7 +237,6 @@ export class LootTracker {
         continue;
       }
 
-      // Avoid top-left overlay for hash+display
       const stableIcon = iconForHashAndDisplay(iconImg);
       const sig = aHash64IgnoreTopLeft(stableIcon);
       const qty = readStackNumber(numImg);
@@ -274,6 +272,13 @@ export class LootTracker {
       return;
     }
 
+    // If the new sig is "close enough" to the old sig, treat as unchanged.
+    if (slot.sig && hamming64hex(slot.sig, sig) <= HAMMING_SAME_ITEM_MAX) {
+      // keep old stable sig; still store icon if missing
+      if (iconImg && !this.iconImgs.has(slot.sig)) this.iconImgs.set(slot.sig, iconImg);
+      return;
+    }
+
     // debounce: require 2 consecutive frames with same sig
     if (slot.pendingSig !== sig) {
       slot.pendingSig = sig;
@@ -295,18 +300,19 @@ export class LootTracker {
 
     if (iconImg && !this.iconImgs.has(sig)) this.iconImgs.set(sig, iconImg);
 
-    // ✅ No OCR yet: ONLY record when item CHANGES (prevents duplicates from count overlay)
+    // No OCR yet: ONLY record when item CHANGES
     if (qty === null) {
       if (prevSig !== sig) this.addLoot(sig, this.displayName(sig), 1, iconImg);
       return;
     }
 
-    // If OCR works later:
+    // OCR later will handle decreases properly:
     if (prevSig !== sig || prevQty === null) {
       this.addLoot(sig, this.displayName(sig), qty, iconImg);
       return;
     }
     if (qty > prevQty) this.addLoot(sig, this.displayName(sig), qty - prevQty, iconImg);
+    // if qty < prevQty: ignore (consumed/spent)
   }
 
   private addLoot(key: string, name: string, qty: number, iconImg: ImageData | null) {
