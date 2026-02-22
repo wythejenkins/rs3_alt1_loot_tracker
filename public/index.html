@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="alt1-app"
+      content="appconfig.json"
+    />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Alt1 Loot Tracker</title>
+    <style>
+      body { font-family: sans-serif; margin: 0; padding: 12px; background: #0e0f12; color: #e8e8e8; }
+      h1 { margin: 0 0 10px; font-size: 18px; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+      button, input { background: #1b1e26; border: 1px solid #2a2f3b; color: #e8e8e8; padding: 8px 10px; border-radius: 8px; }
+      button:hover { border-color: #3a4254; cursor: pointer; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .pill { padding: 6px 10px; border-radius: 999px; border: 1px solid #2a2f3b; background:#141722; font-size: 12px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+      th, td { border-bottom: 1px solid #222635; padding: 8px; text-align: left; font-size: 13px; }
+      th { color: #b7c0d8; font-weight: 600; }
+      .muted { color: #98a3bf; font-size: 12px; }
+      .two { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      @media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
+      .card { border: 1px solid #222635; background:#11131b; border-radius: 12px; padding: 10px; }
+      .loot-icon { width: 26px; height: 26px; border-radius: 6px; border: 1px solid #2a2f3b; image-rendering: pixelated; }
+      .flex { display:flex; align-items:center; gap:8px; }
+      .right { text-align:right; }
+    </style>
+  </head>
+  <body>
+    <h1>Alt1 Loot Tracker (Inventory Diff)</h1>
+
+    <div class="row">
+      <button id="btnCalibInv">Calibrate Inventory Region</button>
+      <button id="btnCalibMoney">Calibrate Money Gain Region</button>
+      <span class="pill" id="statusInv">Inventory: not set</span>
+      <span class="pill" id="statusMoney">Money: not set</span>
+    </div>
+
+    <div class="row">
+      <input id="sessionLabel" placeholder="Session label (e.g., Kraken, Slayer, Boss)" style="min-width:280px;" />
+      <button id="btnStart">Start</button>
+      <button id="btnPause" disabled>Pause</button>
+      <button id="btnStop" disabled>Stop</button>
+      <span class="pill" id="statusRun">Status: idle</span>
+    </div>
+
+    <div class="two">
+      <div class="card">
+        <div class="muted">Current session loot (positive deltas only)</div>
+        <table>
+          <thead>
+            <tr>
+              <th style="width:42px;">Icon</th>
+              <th>Item</th>
+              <th class="right">Qty</th>
+            </tr>
+          </thead>
+          <tbody id="lootRows"></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <div class="muted">Sessions (saved locally)</div>
+        <table>
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Label</th>
+              <th class="right">Entries</th>
+            </tr>
+          </thead>
+          <tbody id="sessionRows"></tbody>
+        </table>
+        <div class="row" style="margin-top:10px;">
+          <button id="btnClearAll">Clear All Saved Sessions</button>
+        </div>
+        <div class="muted">
+          Tip: You can “name” unidentified icons by clicking an item row (stores a mapping locally).
+        </div>
+      </div>
+    </div>
+
+    <script src="/bundle.js"></script>
+  </body>
+</html>
