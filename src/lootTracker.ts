@@ -6,24 +6,9 @@ import { AppState, LootEntry, Rect, Session } from "./storage";
 type RunState = "idle" | "running" | "paused";
 type SlotSnap = { sig: string | null; qty: number | null };
 
-function promptRect(title: string, existing: Rect | null): Rect | null {
-  const def = existing ? `${existing.x},${existing.y},${existing.w},${existing.h}` : "";
-  const raw = prompt(`${title}\n\nEnter x,y,w,h (RS client pixels):`, def);
-  if (!raw) return null;
-
-  const parts = raw.split(",").map((s) => Number(s.trim()));
-  if (parts.length !== 4) return null;
-
-  const [x, y, w, h] = parts;
-  if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) return null;
-  return { x, y, w, h };
-}
-
 function toImageData(ref: any): { img: ImageData | null; why: string } {
-  // Already ImageData
   if (typeof ImageData !== "undefined" && ref instanceof ImageData) return { img: ref, why: "already ImageData" };
 
-  // toData()
   try {
     if (typeof ref?.toData === "function") {
       const out = ref.toData();
@@ -31,7 +16,6 @@ function toImageData(ref: any): { img: ImageData | null; why: string } {
     }
   } catch {}
 
-  // getData()
   try {
     if (typeof ref?.getData === "function") {
       const out = ref.getData();
@@ -39,7 +23,6 @@ function toImageData(ref: any): { img: ImageData | null; why: string } {
     }
   } catch {}
 
-  // read(x,y,w,h)
   try {
     if (typeof ref?.read === "function") {
       const w = ref.width ?? ref.w;
@@ -51,7 +34,6 @@ function toImageData(ref: any): { img: ImageData | null; why: string } {
     }
   } catch {}
 
-  // read()
   try {
     if (typeof ref?.read === "function") {
       const out = ref.read();
@@ -87,6 +69,12 @@ export class LootTracker {
   hasMoneyRegion() { return !!this.moneyRegion; }
   getRunState() { return this.runState; }
 
+  getDiagLine(): string {
+    const alt1: any = (window as any).alt1;
+    if (!alt1) return "alt1: not detected";
+    return `alt1 ok | pixel=${!!alt1.permissionPixel} overlay=${!!alt1.permissionOverlay} rsLinked=${!!alt1.rsLinked}`;
+  }
+
   getCurrentLoot(): LootEntry[] {
     return Object.values(this.loot).sort((a, b) => b.qty - a.qty);
   }
@@ -94,12 +82,6 @@ export class LootTracker {
   reset() {
     this.loot = {};
     this.slots = this.slots.map(() => ({ sig: null, qty: null }));
-  }
-
-  getDiagLine(): string {
-    const alt1: any = (window as any).alt1;
-    if (!alt1) return "alt1: not detected";
-    return `alt1 ok | pixel=${!!alt1.permissionPixel} overlay=${!!alt1.permissionOverlay} rsLinked=${!!alt1.rsLinked}`;
   }
 
   setInventoryRegion(r: Rect) {
@@ -114,43 +96,33 @@ export class LootTracker {
     this.updateCb?.();
   }
 
-  async calibrateInventoryRegion(): Promise<boolean> {
-    const r = promptRect("Set Inventory Region", this.invRegion);
-    if (!r) return false;
-    this.setInventoryRegion(r);
-    return true;
+  captureFullImageData(): { img: ImageData | null; error: string | null; why?: string } {
+    const imgRef: any = captureHoldFullRs();
+    if (!imgRef) return { img: null, error: "captureHoldFullRs() returned null" };
+    const conv = toImageData(imgRef);
+    if (!conv.img) return { img: null, error: conv.why };
+    return { img: conv.img, error: null, why: conv.why };
   }
 
-  async calibrateMoneyRegion(): Promise<boolean> {
-    const r = promptRect("Set Money Region", this.moneyRegion);
-    if (!r) return false;
-    this.setMoneyRegion(r);
-    return true;
-  }
-
-  previewRegionImageData(kind: "inv" | "money", override?: Rect): { img: ImageData | null; error: string | null; why?: string } {
-    const r = override ?? (kind === "inv" ? this.invRegion : this.moneyRegion);
-    if (!r) return { img: null, error: "Region not set." };
-
+  previewRegionImageData(kind: "inv" | "money", rect: Rect): { img: ImageData | null; error: string | null; why?: string } {
     const img: any = captureHoldFullRs();
     if (!img) return { img: null, error: "captureHoldFullRs() returned null." };
     if (typeof img.crop !== "function") return { img: null, error: "Capture object has no crop() method." };
 
     let cropRef: any;
     try {
-      cropRef = img.crop(r.x, r.y, r.w, r.h);
+      cropRef = img.crop(rect.x, rect.y, rect.w, rect.h);
     } catch (e: any) {
       return { img: null, error: `crop() threw: ${String(e?.message ?? e)}` };
     }
 
     const conv = toImageData(cropRef);
     if (!conv.img) return { img: null, error: conv.why };
-
     return { img: conv.img, error: null, why: conv.why };
   }
 
   start(label: string) {
-    if (!this.invRegion) { return; }
+    if (!this.invRegion) return;
 
     this.runState = "running";
     this.reset();
