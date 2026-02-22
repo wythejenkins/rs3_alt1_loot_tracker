@@ -20,10 +20,10 @@ function promptRect(title: string, existing: Rect | null): Rect | null {
 }
 
 function toImageData(ref: any): { img: ImageData | null; why: string } {
-  // 1) already ImageData
+  // Already ImageData
   if (typeof ImageData !== "undefined" && ref instanceof ImageData) return { img: ref, why: "already ImageData" };
 
-  // 2) common methods
+  // toData()
   try {
     if (typeof ref?.toData === "function") {
       const out = ref.toData();
@@ -31,6 +31,7 @@ function toImageData(ref: any): { img: ImageData | null; why: string } {
     }
   } catch {}
 
+  // getData()
   try {
     if (typeof ref?.getData === "function") {
       const out = ref.getData();
@@ -38,7 +39,7 @@ function toImageData(ref: any): { img: ImageData | null; why: string } {
     }
   } catch {}
 
-  // 3) Alt1 ImgRef-style API: read(x,y,w,h) => ImageData-like
+  // read(x,y,w,h)
   try {
     if (typeof ref?.read === "function") {
       const w = ref.width ?? ref.w;
@@ -50,7 +51,7 @@ function toImageData(ref: any): { img: ImageData | null; why: string } {
     }
   } catch {}
 
-  // 4) Sometimes read() takes no args and returns ImageData
+  // read()
   try {
     if (typeof ref?.read === "function") {
       const out = ref.read();
@@ -58,21 +59,7 @@ function toImageData(ref: any): { img: ImageData | null; why: string } {
     }
   } catch {}
 
-  return { img: null, why: "No usable ImageData conversion method found (toData/getData/read)" };
-}
-
-function imageDataToDataUrl(img: ImageData): string | null {
-  try {
-    const canvas = document.createElement("canvas");
-    canvas.width = img.width;
-    canvas.height = img.height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.putImageData(img, 0, 0);
-    return canvas.toDataURL("image/png");
-  } catch {
-    return null;
-  }
+  return { img: null, why: "No ImageData conversion method found (toData/getData/read)" };
 }
 
 export class LootTracker {
@@ -141,32 +128,29 @@ export class LootTracker {
     return true;
   }
 
-  previewRegion(kind: "inv" | "money", override?: Rect): { dataUrl: string | null; error: string | null } {
+  previewRegionImageData(kind: "inv" | "money", override?: Rect): { img: ImageData | null; error: string | null; why?: string } {
     const r = override ?? (kind === "inv" ? this.invRegion : this.moneyRegion);
-    if (!r) return { dataUrl: null, error: "Region not set." };
+    if (!r) return { img: null, error: "Region not set." };
 
     const img: any = captureHoldFullRs();
-    if (!img) return { dataUrl: null, error: "captureHoldFullRs() returned null." };
-    if (typeof img.crop !== "function") return { dataUrl: null, error: "Capture object has no crop() method." };
+    if (!img) return { img: null, error: "captureHoldFullRs() returned null." };
+    if (typeof img.crop !== "function") return { img: null, error: "Capture object has no crop() method." };
 
     let cropRef: any;
     try {
       cropRef = img.crop(r.x, r.y, r.w, r.h);
     } catch (e: any) {
-      return { dataUrl: null, error: `crop() threw: ${String(e?.message ?? e)}` };
+      return { img: null, error: `crop() threw: ${String(e?.message ?? e)}` };
     }
 
     const conv = toImageData(cropRef);
-    if (!conv.img) return { dataUrl: null, error: conv.why };
+    if (!conv.img) return { img: null, error: conv.why };
 
-    const url = imageDataToDataUrl(conv.img);
-    if (!url) return { dataUrl: null, error: "Canvas conversion failed (toDataURL)." };
-
-    return { dataUrl: url, error: null };
+    return { img: conv.img, error: null, why: conv.why };
   }
 
   start(label: string) {
-    if (!this.invRegion) { alert("Inventory region not set."); return; }
+    if (!this.invRegion) { return; }
 
     this.runState = "running";
     this.reset();
@@ -274,7 +258,6 @@ export class LootTracker {
     if (qty <= 0) return;
     if (!this.loot[key]) this.loot[key] = { key, name, qty: 0, iconSig: key };
     this.loot[key].qty += qty;
-
     if (this.state.activeSession) this.state.activeSession.loot = this.getCurrentLoot();
   }
 
