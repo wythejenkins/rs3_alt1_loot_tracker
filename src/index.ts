@@ -101,6 +101,7 @@ btnPreviewInv.onclick = () => {
   if (!r) return alert("Invalid inventory rect.");
   const res = tracker.previewRegion("inv", r);
   setPreview(imgInv, res.dataUrl);
+  if (res.error) alert(res.error);
   refreshUI(res.error ? `inv preview: ${res.error}` : "inv preview ok");
 };
 
@@ -116,6 +117,7 @@ btnPreviewMoney.onclick = () => {
   if (!r) return alert("Invalid money rect.");
   const res = tracker.previewRegion("money", r);
   setPreview(imgMoney, res.dataUrl);
+  if (res.error) alert(res.error);
   refreshUI(res.error ? `money preview: ${res.error}` : "money preview ok");
 };
 
@@ -126,7 +128,7 @@ btnStart.onclick = () => {
 
 btnPause.onclick = () => {
   tracker.togglePause();
-  refreshUI("toggled pause");
+  refreshUI("pause toggled");
 };
 
 btnStop.onclick = () => {

@@ -19,36 +19,46 @@ function promptRect(title: string, existing: Rect | null): Rect | null {
   return { x, y, w, h };
 }
 
-function refToImageData(ref: any): ImageData | null {
-  // Already ImageData?
-  if (typeof ImageData !== "undefined" && ref instanceof ImageData) return ref;
+function toImageData(ref: any): { img: ImageData | null; why: string } {
+  // 1) already ImageData
+  if (typeof ImageData !== "undefined" && ref instanceof ImageData) return { img: ref, why: "already ImageData" };
 
-  // Common Alt1 image-ref conversion methods (runtime varies)
+  // 2) common methods
   try {
     if (typeof ref?.toData === "function") {
-      // Some builds: toData() -> ImageData
       const out = ref.toData();
-      if (out && out.data && typeof out.width === "number" && typeof out.height === "number") return out as ImageData;
+      if (out?.data && typeof out.width === "number" && typeof out.height === "number") return { img: out as ImageData, why: "toData()" };
     }
   } catch {}
 
   try {
     if (typeof ref?.getData === "function") {
-      // Some builds: getData() -> ImageData
       const out = ref.getData();
-      if (out && out.data && typeof out.width === "number" && typeof out.height === "number") return out as ImageData;
+      if (out?.data && typeof out.width === "number" && typeof out.height === "number") return { img: out as ImageData, why: "getData()" };
     }
   } catch {}
 
-  // Some builds expose a different signature: toData(x,y,w,h)
+  // 3) Alt1 ImgRef-style API: read(x,y,w,h) => ImageData-like
   try {
-    if (typeof ref?.toData === "function" && typeof ref?.width === "number" && typeof ref?.height === "number") {
-      const out = ref.toData(0, 0, ref.width, ref.height);
-      if (out && out.data && typeof out.width === "number" && typeof out.height === "number") return out as ImageData;
+    if (typeof ref?.read === "function") {
+      const w = ref.width ?? ref.w;
+      const h = ref.height ?? ref.h;
+      if (typeof w === "number" && typeof h === "number") {
+        const out = ref.read(0, 0, w, h);
+        if (out?.data && typeof out.width === "number" && typeof out.height === "number") return { img: out as ImageData, why: "read(0,0,w,h)" };
+      }
     }
   } catch {}
 
-  return null;
+  // 4) Sometimes read() takes no args and returns ImageData
+  try {
+    if (typeof ref?.read === "function") {
+      const out = ref.read();
+      if (out?.data && typeof out.width === "number" && typeof out.height === "number") return { img: out as ImageData, why: "read()" };
+    }
+  } catch {}
+
+  return { img: null, why: "No usable ImageData conversion method found (toData/getData/read)" };
 }
 
 function imageDataToDataUrl(img: ImageData): string | null {
@@ -131,9 +141,6 @@ export class LootTracker {
     return true;
   }
 
-  /**
-   * Returns { dataUrl, error } so UI can show meaningful feedback.
-   */
   previewRegion(kind: "inv" | "money", override?: Rect): { dataUrl: string | null; error: string | null } {
     const r = override ?? (kind === "inv" ? this.invRegion : this.moneyRegion);
     if (!r) return { dataUrl: null, error: "Region not set." };
@@ -149,10 +156,10 @@ export class LootTracker {
       return { dataUrl: null, error: `crop() threw: ${String(e?.message ?? e)}` };
     }
 
-    const id = refToImageData(cropRef);
-    if (!id) return { dataUrl: null, error: "Could not convert crop to ImageData (no toData/getData available)." };
+    const conv = toImageData(cropRef);
+    if (!conv.img) return { dataUrl: null, error: conv.why };
 
-    const url = imageDataToDataUrl(id);
+    const url = imageDataToDataUrl(conv.img);
     if (!url) return { dataUrl: null, error: "Canvas conversion failed (toDataURL)." };
 
     return { dataUrl: url, error: null };
