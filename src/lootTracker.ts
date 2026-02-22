@@ -11,12 +11,23 @@ function promptRect(title: string, existing: Rect | null): Rect | null {
   const raw = prompt(`${title}\n\nEnter x,y,w,h (RS client pixels):`, def);
   if (!raw) return null;
 
-  const parts = raw.split(",").map(s => Number(s.trim()));
+  const parts = raw.split(",").map((s) => Number(s.trim()));
   if (parts.length !== 4) return null;
 
   const [x, y, w, h] = parts;
   if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) return null;
   return { x, y, w, h };
+}
+
+function getOverlayColorInt(): number {
+  // Best case: a1lib.mixColor exists (common in Alt1 environments).
+  // Fallback: a bright white value (still often works).
+  const a1lib: any = (window as any).a1lib;
+  if (a1lib?.mixColor) {
+    // mixColor(r,g,b,a?) — alpha optional
+    return a1lib.mixColor(255, 255, 0); // yellow-ish
+  }
+  return 0xffffffff;
 }
 
 export class LootTracker {
@@ -32,17 +43,27 @@ export class LootTracker {
   private timer: number | null = null;
   private updateCb: (() => void) | null = null;
 
+  private readonly overlayGroup = "loottracker_preview";
+
   constructor(state: AppState) {
     this.state = state;
     this.invRegion = state.settings.invRegion ?? null;
     this.moneyRegion = state.settings.moneyRegion ?? null;
   }
 
-  onUpdate(cb: () => void) { this.updateCb = cb; }
+  onUpdate(cb: () => void) {
+    this.updateCb = cb;
+  }
 
-  hasInventoryRegion() { return !!this.invRegion; }
-  hasMoneyRegion() { return !!this.moneyRegion; }
-  getRunState() { return this.runState; }
+  hasInventoryRegion() {
+    return !!this.invRegion;
+  }
+  hasMoneyRegion() {
+    return !!this.moneyRegion;
+  }
+  getRunState() {
+    return this.runState;
+  }
 
   getCurrentLoot(): LootEntry[] {
     return Object.values(this.loot).sort((a, b) => b.qty - a.qty);
@@ -69,20 +90,43 @@ export class LootTracker {
   // Overlay preview helpers (requires Overlay permission)
   clearOverlay() {
     const alt1: any = (window as any).alt1;
-    if (alt1?.overLayClear) alt1.overLayClear();
+    if (!alt1?.overLayClearGroup) {
+      alert("Alt1 overlay API not available. Make sure Overlay permission is enabled for this app.");
+      return;
+    }
+    alt1.overLayClearGroup(this.overlayGroup);
   }
 
   previewRect(r: Rect) {
     const alt1: any = (window as any).alt1;
-    if (!alt1?.overLayRect) {
-      alert("Overlay not available. Enable Overlay permission for this app in Alt1 Settings → Apps.");
+    if (!alt1?.overLayRect || !alt1?.overLaySetGroup) {
+      alert("Alt1 overlay API not available. Enable Overlay permission for this app in Alt1 Settings → Apps.");
       return;
     }
-    // color is ARGB-ish; 0xffff00 is yellow; thickness=2
-    alt1.overLayRect(r.x, r.y, r.w, r.h, 0xffff00, 2);
+
+    // Group the overlays so we can clear them cleanly
+    alt1.overLaySetGroup(this.overlayGroup);
+
+    const color = getOverlayColorInt();
+    const timeMs = 3000; // show for 3 seconds
+    const lineWidth = 2;
+
+    // Correct signature:
+    // overLayRect(color, x, y, w, h, timeMs, lineWidth)
+    const ok = alt1.overLayRect(color, r.x, r.y, r.w, r.h, timeMs, lineWidth);
+
+    if (ok === false) {
+      alert(
+        "Alt1 rejected the overlay draw call.\n\n" +
+          "Try:\n" +
+          "• Ensure Overlay permission is enabled\n" +
+          "• Run Alt1 as Administrator (some systems block overlays)\n" +
+          "• Make sure RS is NOT running as Administrator\n"
+      );
+    }
   }
 
-  // “Calibrate” buttons now just use a manual prompt (no Alt+1 dependency)
+  // “Calibrate” buttons use manual prompt
   async calibrateInventoryRegion(): Promise<boolean> {
     const r = promptRect("Calibrate Inventory Region", this.invRegion);
     if (!r) return false;
@@ -98,7 +142,10 @@ export class LootTracker {
   }
 
   start(label: string) {
-    if (!this.invRegion) { alert("Inventory region not set."); return; }
+    if (!this.invRegion) {
+      alert("Inventory region not set.");
+      return;
+    }
 
     this.runState = "running";
     this.reset();
@@ -156,7 +203,8 @@ export class LootTracker {
     const img: any = captureHoldFullRs();
     if (!img || typeof img.crop !== "function") return;
 
-    const cols = 4, rows = 7;
+    const cols = 4,
+      rows = 7;
     const slotW = Math.floor(this.invRegion.w / cols);
     const slotH = Math.floor(this.invRegion.h / rows);
 
