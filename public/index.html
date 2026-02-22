@@ -2,16 +2,13 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <meta
-      name="alt1-app"
-      content="appconfig.json"
-    />
+    <meta name="alt1-app" content="appconfig.json" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Alt1 Loot Tracker</title>
     <style>
       body { font-family: sans-serif; margin: 0; padding: 12px; background: #0e0f12; color: #e8e8e8; }
       h1 { margin: 0 0 10px; font-size: 18px; }
-      .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; align-items:center; }
       button, input { background: #1b1e26; border: 1px solid #2a2f3b; color: #e8e8e8; padding: 8px 10px; border-radius: 8px; }
       button:hover { border-color: #3a4254; cursor: pointer; }
       button:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -23,19 +20,47 @@
       .two { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
       @media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
       .card { border: 1px solid #222635; background:#11131b; border-radius: 12px; padding: 10px; }
-      .loot-icon { width: 26px; height: 26px; border-radius: 6px; border: 1px solid #2a2f3b; image-rendering: pixelated; }
-      .flex { display:flex; align-items:center; gap:8px; }
       .right { text-align:right; }
+      .small { width: 74px; }
     </style>
   </head>
   <body>
     <h1>Alt1 Loot Tracker (Inventory Diff)</h1>
 
     <div class="row">
-      <button id="btnCalibInv">Calibrate Inventory Region</button>
-      <button id="btnCalibMoney">Calibrate Money Gain Region</button>
+      <button id="btnCalibInv">Calibrate Inventory Region (manual prompt)</button>
+      <button id="btnCalibMoney">Calibrate Money Gain Region (manual prompt)</button>
       <span class="pill" id="statusInv">Inventory: not set</span>
       <span class="pill" id="statusMoney">Money: not set</span>
+    </div>
+
+    <div class="card" style="margin-bottom:12px;">
+      <div class="muted">Manual regions (x,y,w,h in RS client pixels). Use Preview to draw an overlay rectangle on the game.</div>
+
+      <div class="row" style="margin-top:8px;">
+        <span class="pill">Inventory</span>
+        <input id="invX" class="small" placeholder="x" />
+        <input id="invY" class="small" placeholder="y" />
+        <input id="invW" class="small" placeholder="w" />
+        <input id="invH" class="small" placeholder="h" />
+        <button id="btnSetInv">Set</button>
+        <button id="btnPreviewInv">Preview</button>
+      </div>
+
+      <div class="row">
+        <span class="pill">Money</span>
+        <input id="monX" class="small" placeholder="x" />
+        <input id="monY" class="small" placeholder="y" />
+        <input id="monW" class="small" placeholder="w" />
+        <input id="monH" class="small" placeholder="h" />
+        <button id="btnSetMoney">Set</button>
+        <button id="btnPreviewMoney">Preview</button>
+      </div>
+
+      <div class="row">
+        <button id="btnClearOverlay">Clear Overlay</button>
+        <span class="muted">If Preview does nothing, enable Overlay permission for the app in Alt1.</span>
+      </div>
     </div>
 
     <div class="row">
@@ -52,7 +77,6 @@
         <table>
           <thead>
             <tr>
-              <th style="width:42px;">Icon</th>
               <th>Item</th>
               <th class="right">Qty</th>
             </tr>
@@ -75,9 +99,6 @@
         </table>
         <div class="row" style="margin-top:10px;">
           <button id="btnClearAll">Clear All Saved Sessions</button>
-        </div>
-        <div class="muted">
-          Tip: You can “name” unidentified icons by clicking an item row (stores a mapping locally).
         </div>
       </div>
     </div>
