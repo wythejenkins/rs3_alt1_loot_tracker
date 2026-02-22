@@ -49,11 +49,13 @@ function fillInputsFromState() {
   }
 }
 
-function refreshUI() {
+function refreshUI(extraDiag?: string) {
   setText("statusInv", tracker.hasInventoryRegion() ? "Inventory: set" : "Inventory: not set");
   setText("statusMoney", tracker.hasMoneyRegion() ? "Money: set" : "Money: not set");
   setText("statusRun", `Status: ${tracker.getRunState()}`);
-  setText("diag", tracker.getDiagLine());
+
+  const baseDiag = tracker.getDiagLine();
+  setText("diag", extraDiag ? `${baseDiag} | ${extraDiag}` : baseDiag);
 
   btnStart.disabled = tracker.getRunState() !== "idle";
   btnPause.disabled = tracker.getRunState() === "idle";
@@ -68,7 +70,6 @@ function refreshUI() {
 function setPreview(imgEl: HTMLImageElement, dataUrl: string | null) {
   if (!dataUrl) {
     imgEl.removeAttribute("src");
-    imgEl.alt = "Preview unavailable (no data URL method found)";
     return;
   }
   imgEl.src = dataUrl;
@@ -78,55 +79,59 @@ btnCalibInv.onclick = async () => {
   const ok = await tracker.calibrateInventoryRegion();
   if (!ok) return;
   fillInputsFromState();
-  refreshUI();
+  refreshUI("inv set");
 };
 
 btnCalibMoney.onclick = async () => {
   const ok = await tracker.calibrateMoneyRegion();
   if (!ok) return;
   fillInputsFromState();
-  refreshUI();
+  refreshUI("money set");
 };
 
 btnSetInv.onclick = () => {
   const r = readRect("inv");
   if (!r) return alert("Invalid inventory rect.");
   tracker.setInventoryRegion(r);
-  refreshUI();
+  refreshUI("inv set");
 };
 
 btnPreviewInv.onclick = () => {
   const r = readRect("inv");
   if (!r) return alert("Invalid inventory rect.");
-  setPreview(imgInv, tracker.previewRegion("inv", r));
+  const res = tracker.previewRegion("inv", r);
+  setPreview(imgInv, res.dataUrl);
+  refreshUI(res.error ? `inv preview: ${res.error}` : "inv preview ok");
 };
 
 btnSetMoney.onclick = () => {
   const r = readRect("mon");
   if (!r) return alert("Invalid money rect.");
   tracker.setMoneyRegion(r);
-  refreshUI();
+  refreshUI("money set");
 };
 
 btnPreviewMoney.onclick = () => {
   const r = readRect("mon");
   if (!r) return alert("Invalid money rect.");
-  setPreview(imgMoney, tracker.previewRegion("money", r));
+  const res = tracker.previewRegion("money", r);
+  setPreview(imgMoney, res.dataUrl);
+  refreshUI(res.error ? `money preview: ${res.error}` : "money preview ok");
 };
 
 btnStart.onclick = () => {
   tracker.start(sessionLabel.value.trim() || "Unnamed");
-  refreshUI();
+  refreshUI("started");
 };
 
 btnPause.onclick = () => {
   tracker.togglePause();
-  refreshUI();
+  refreshUI("toggled pause");
 };
 
 btnStop.onclick = () => {
   tracker.stop();
-  refreshUI();
+  refreshUI("stopped");
 };
 
 btnClearAll.onclick = () => {
@@ -134,9 +139,9 @@ btnClearAll.onclick = () => {
   state.sessions = [];
   state.iconNames = {};
   tracker.reset();
-  refreshUI();
+  refreshUI("cleared");
 };
 
-tracker.onUpdate(refreshUI);
+tracker.onUpdate(() => refreshUI());
 fillInputsFromState();
 refreshUI();

@@ -19,18 +19,47 @@ function promptRect(title: string, existing: Rect | null): Rect | null {
   return { x, y, w, h };
 }
 
-function imgRefToDataUrl(ref: any): string | null {
-  // Try a few common runtime methods (typings vary a lot in Alt1 alphas).
+function refToImageData(ref: any): ImageData | null {
+  // Already ImageData?
+  if (typeof ImageData !== "undefined" && ref instanceof ImageData) return ref;
+
+  // Common Alt1 image-ref conversion methods (runtime varies)
   try {
-    if (typeof ref?.toPngDataUrl === "function") return ref.toPngDataUrl();
+    if (typeof ref?.toData === "function") {
+      // Some builds: toData() -> ImageData
+      const out = ref.toData();
+      if (out && out.data && typeof out.width === "number" && typeof out.height === "number") return out as ImageData;
+    }
   } catch {}
+
   try {
-    if (typeof ref?.toDataURL === "function") return ref.toDataURL();
+    if (typeof ref?.getData === "function") {
+      // Some builds: getData() -> ImageData
+      const out = ref.getData();
+      if (out && out.data && typeof out.width === "number" && typeof out.height === "number") return out as ImageData;
+    }
   } catch {}
+
+  // Some builds expose a different signature: toData(x,y,w,h)
   try {
-    // Sometimes: ref.toData() returns ImageData-like which can be drawn to canvas,
-    // but we keep this simple and just return null if not directly supported.
-    return null;
+    if (typeof ref?.toData === "function" && typeof ref?.width === "number" && typeof ref?.height === "number") {
+      const out = ref.toData(0, 0, ref.width, ref.height);
+      if (out && out.data && typeof out.width === "number" && typeof out.height === "number") return out as ImageData;
+    }
+  } catch {}
+
+  return null;
+}
+
+function imageDataToDataUrl(img: ImageData): string | null {
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.putImageData(img, 0, 0);
+    return canvas.toDataURL("image/png");
   } catch {
     return null;
   }
@@ -102,15 +131,31 @@ export class LootTracker {
     return true;
   }
 
-  previewRegion(kind: "inv" | "money", override?: Rect): string | null {
+  /**
+   * Returns { dataUrl, error } so UI can show meaningful feedback.
+   */
+  previewRegion(kind: "inv" | "money", override?: Rect): { dataUrl: string | null; error: string | null } {
     const r = override ?? (kind === "inv" ? this.invRegion : this.moneyRegion);
-    if (!r) return null;
+    if (!r) return { dataUrl: null, error: "Region not set." };
 
     const img: any = captureHoldFullRs();
-    if (!img || typeof img.crop !== "function") return null;
+    if (!img) return { dataUrl: null, error: "captureHoldFullRs() returned null." };
+    if (typeof img.crop !== "function") return { dataUrl: null, error: "Capture object has no crop() method." };
 
-    const crop = img.crop(r.x, r.y, r.w, r.h);
-    return imgRefToDataUrl(crop);
+    let cropRef: any;
+    try {
+      cropRef = img.crop(r.x, r.y, r.w, r.h);
+    } catch (e: any) {
+      return { dataUrl: null, error: `crop() threw: ${String(e?.message ?? e)}` };
+    }
+
+    const id = refToImageData(cropRef);
+    if (!id) return { dataUrl: null, error: "Could not convert crop to ImageData (no toData/getData available)." };
+
+    const url = imageDataToDataUrl(id);
+    if (!url) return { dataUrl: null, error: "Canvas conversion failed (toDataURL)." };
+
+    return { dataUrl: url, error: null };
   }
 
   start(label: string) {
@@ -118,11 +163,8 @@ export class LootTracker {
 
     this.runState = "running";
     this.reset();
-
-    // baseline
     this.captureAndUpdate(true);
 
-    // loop
     if (this.timer) window.clearInterval(this.timer);
     this.timer = window.setInterval(() => {
       if (this.runState !== "running") return;

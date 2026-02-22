@@ -1,8 +1,8 @@
 {
   "appName": "Loot Tracker (Inventory Diff)",
   "description": "Tracks inventory stack increases + money pouch gains by pixel scanning.",
-  "appUrl": "index.html?v=20260222a",
-  "configUrl": "appconfig.json?v=20260222a",
+  "appUrl": "index.html",
+  "configUrl": "appconfig.json",
   "iconUrl": "",
   "defaultWidth": 420,
   "defaultHeight": 560,
