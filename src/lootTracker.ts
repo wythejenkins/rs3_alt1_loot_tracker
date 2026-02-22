@@ -19,14 +19,10 @@ function promptRect(title: string, existing: Rect | null): Rect | null {
   return { x, y, w, h };
 }
 
-function getOverlayColorInt(): number {
-  // Best case: a1lib.mixColor exists (common in Alt1 environments).
-  // Fallback: a bright white value (still often works).
+function mixColorSafe(r: number, g: number, b: number): number {
   const a1lib: any = (window as any).a1lib;
-  if (a1lib?.mixColor) {
-    // mixColor(r,g,b,a?) — alpha optional
-    return a1lib.mixColor(255, 255, 0); // yellow-ish
-  }
+  if (a1lib?.mixColor) return a1lib.mixColor(r, g, b);
+  // Fallback (may still work depending on build)
   return 0xffffffff;
 }
 
@@ -51,19 +47,11 @@ export class LootTracker {
     this.moneyRegion = state.settings.moneyRegion ?? null;
   }
 
-  onUpdate(cb: () => void) {
-    this.updateCb = cb;
-  }
+  onUpdate(cb: () => void) { this.updateCb = cb; }
 
-  hasInventoryRegion() {
-    return !!this.invRegion;
-  }
-  hasMoneyRegion() {
-    return !!this.moneyRegion;
-  }
-  getRunState() {
-    return this.runState;
-  }
+  hasInventoryRegion() { return !!this.invRegion; }
+  hasMoneyRegion() { return !!this.moneyRegion; }
+  getRunState() { return this.runState; }
 
   getCurrentLoot(): LootEntry[] {
     return Object.values(this.loot).sort((a, b) => b.qty - a.qty);
@@ -74,7 +62,6 @@ export class LootTracker {
     this.slots = this.slots.map(() => ({ sig: null, qty: null }));
   }
 
-  // Manual setters
   setInventoryRegion(r: Rect) {
     this.invRegion = r;
     this.state.settings.invRegion = r;
@@ -87,46 +74,73 @@ export class LootTracker {
     this.updateCb?.();
   }
 
-  // Overlay preview helpers (requires Overlay permission)
+  // --- Overlay helpers (screen coords!) ---
+  private rsClientToScreen(r: Rect): Rect {
+    const alt1: any = (window as any).alt1;
+    if (alt1?.rsLinked) {
+      return { x: r.x + (alt1.rsX ?? 0), y: r.y + (alt1.rsY ?? 0), w: r.w, h: r.h };
+    }
+    return r; // best effort
+  }
+
   clearOverlay() {
     const alt1: any = (window as any).alt1;
     if (!alt1?.overLayClearGroup) {
-      alert("Alt1 overlay API not available. Make sure Overlay permission is enabled for this app.");
+      alert("Overlay API not available. Make sure the app has Overlay permission.");
       return;
     }
-    alt1.overLayClearGroup(this.overlayGroup);
+    alt1.overLayClearGroup(this.overlayGroup); // group-based clearing :contentReference[oaicite:1]{index=1}
   }
 
   previewRect(r: Rect) {
     const alt1: any = (window as any).alt1;
-    if (!alt1?.overLayRect || !alt1?.overLaySetGroup) {
-      alert("Alt1 overlay API not available. Enable Overlay permission for this app in Alt1 Settings → Apps.");
+    if (!alt1?.overLayRect || !alt1?.overLaySetGroup || !alt1?.overLayText) {
+      alert("Overlay API not available. Enable Overlay permission for this app in Alt1 Settings → Apps.");
       return;
     }
 
-    // Group the overlays so we can clear them cleanly
+    // Diagnostic info so we can tell if rs is linked / coords are sane
+    const info =
+      `OverlayPerm=${alt1.permissionOverlay} PixelPerm=${alt1.permissionPixel} ` +
+      `rsLinked=${alt1.rsLinked} rsX=${alt1.rsX} rsY=${alt1.rsY}`;
+
     alt1.overLaySetGroup(this.overlayGroup);
 
-    const color = getOverlayColorInt();
-    const timeMs = 3000; // show for 3 seconds
-    const lineWidth = 2;
+    const yellow = mixColorSafe(255, 255, 0);
+    const white = mixColorSafe(255, 255, 255);
 
-    // Correct signature:
-    // overLayRect(color, x, y, w, h, timeMs, lineWidth)
-    const ok = alt1.overLayRect(color, r.x, r.y, r.w, r.h, timeMs, lineWidth);
+    // Draw a very obvious test marker near the RS client top-left (screen space)
+    if (alt1.rsLinked) {
+      alt1.overLayRect(white, alt1.rsX + 10, alt1.rsY + 10, 220, 80, 3000, 3);
+      alt1.overLayText("LootTracker overlay TEST", white, 14, alt1.rsX + 16, alt1.rsY + 16, 3000);
+    } else {
+      // If RS not linked, draw in global screen coords so you can still see *something*
+      alt1.overLayRect(white, (alt1.screenX ?? 0) + 20, (alt1.screenY ?? 0) + 20, 260, 90, 3000, 3);
+      alt1.overLayText("Overlay TEST (RS not linked)", white, 14, (alt1.screenX ?? 0) + 28, (alt1.screenY ?? 0) + 28, 3000);
+    }
+
+    // Now draw the requested preview rect, converted to screen coords
+    const sr = this.rsClientToScreen(r);
+
+    // Correct signature: overLayRect(color, x, y, w, h, timeMs, lineWidth) :contentReference[oaicite:2]{index=2}
+    const ok = alt1.overLayRect(yellow, sr.x, sr.y, sr.w, sr.h, 3000, 2);
+    alt1.overLayText(ok ? "Preview OK" : "Preview FAILED", yellow, 14, sr.x + 6, sr.y + 6, 3000);
 
     if (ok === false) {
       alert(
-        "Alt1 rejected the overlay draw call.\n\n" +
-          "Try:\n" +
-          "• Ensure Overlay permission is enabled\n" +
-          "• Run Alt1 as Administrator (some systems block overlays)\n" +
-          "• Make sure RS is NOT running as Administrator\n"
+        "Alt1 returned false from overLayRect.\n\n" +
+        info +
+        "\n\nCommon fixes:\n" +
+        "• Run Alt1 as Administrator\n" +
+        "• Avoid exclusive fullscreen; use Windowed/Borderless\n" +
+        "• Disable conflicting overlays (Xbox Game Bar / Steam / OBS)\n"
       );
+    } else {
+      console.log("Overlay preview:", { inputRect: r, screenRect: sr, info });
     }
   }
 
-  // “Calibrate” buttons use manual prompt
+  // Manual “calibrate” prompts (no Alt+1 dependency)
   async calibrateInventoryRegion(): Promise<boolean> {
     const r = promptRect("Calibrate Inventory Region", this.invRegion);
     if (!r) return false;
@@ -142,18 +156,13 @@ export class LootTracker {
   }
 
   start(label: string) {
-    if (!this.invRegion) {
-      alert("Inventory region not set.");
-      return;
-    }
+    if (!this.invRegion) { alert("Inventory region not set."); return; }
 
     this.runState = "running";
     this.reset();
 
-    // baseline
     this.captureAndUpdate(true);
 
-    // loop
     if (this.timer) window.clearInterval(this.timer);
     this.timer = window.setInterval(() => {
       if (this.runState !== "running") return;
@@ -203,8 +212,7 @@ export class LootTracker {
     const img: any = captureHoldFullRs();
     if (!img || typeof img.crop !== "function") return;
 
-    const cols = 4,
-      rows = 7;
+    const cols = 4, rows = 7;
     const slotW = Math.floor(this.invRegion.w / cols);
     const slotH = Math.floor(this.invRegion.h / rows);
 
