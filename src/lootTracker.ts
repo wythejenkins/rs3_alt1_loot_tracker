@@ -44,6 +44,35 @@ function toImageData(ref: any): { img: ImageData | null; why: string } {
   return { img: null, why: "No ImageData conversion method found (toData/getData/read)" };
 }
 
+/**
+ * Fast manual crop from ImageData (no canvas needed).
+ */
+function cropImageData(src: ImageData, x: number, y: number, w: number, h: number): ImageData {
+  // clamp to bounds
+  const x0 = Math.max(0, Math.min(src.width - 1, Math.floor(x)));
+  const y0 = Math.max(0, Math.min(src.height - 1, Math.floor(y)));
+  const x1 = Math.max(0, Math.min(src.width, Math.floor(x0 + w)));
+  const y1 = Math.max(0, Math.min(src.height, Math.floor(y0 + h)));
+
+  const cw = Math.max(1, x1 - x0);
+  const ch = Math.max(1, y1 - y0);
+
+  const out = new ImageData(cw, ch);
+  const srcData = src.data;
+  const outData = out.data;
+
+  const srcStride = src.width * 4;
+  const outStride = cw * 4;
+
+  for (let row = 0; row < ch; row++) {
+    const srcRowStart = (y0 + row) * srcStride + x0 * 4;
+    const outRowStart = row * outStride;
+    outData.set(srcData.subarray(srcRowStart, srcRowStart + outStride), outRowStart);
+  }
+
+  return out;
+}
+
 export class LootTracker {
   private state: AppState;
   private runState: RunState = "idle";
@@ -97,28 +126,19 @@ export class LootTracker {
   }
 
   captureFullImageData(): { img: ImageData | null; error: string | null; why?: string } {
-    const imgRef: any = captureHoldFullRs();
-    if (!imgRef) return { img: null, error: "captureHoldFullRs() returned null" };
-    const conv = toImageData(imgRef);
+    const cap: any = captureHoldFullRs();
+    if (!cap) return { img: null, error: "captureHoldFullRs() returned null" };
+    const conv = toImageData(cap);
     if (!conv.img) return { img: null, error: conv.why };
     return { img: conv.img, error: null, why: conv.why };
   }
 
   previewRegionImageData(kind: "inv" | "money", rect: Rect): { img: ImageData | null; error: string | null; why?: string } {
-    const img: any = captureHoldFullRs();
-    if (!img) return { img: null, error: "captureHoldFullRs() returned null." };
-    if (typeof img.crop !== "function") return { img: null, error: "Capture object has no crop() method." };
+    const full = this.captureFullImageData();
+    if (full.error || !full.img) return { img: null, error: full.error, why: full.why };
 
-    let cropRef: any;
-    try {
-      cropRef = img.crop(rect.x, rect.y, rect.w, rect.h);
-    } catch (e: any) {
-      return { img: null, error: `crop() threw: ${String(e?.message ?? e)}` };
-    }
-
-    const conv = toImageData(cropRef);
-    if (!conv.img) return { img: null, error: conv.why };
-    return { img: conv.img, error: null, why: conv.why };
+    const cropped = cropImageData(full.img, rect.x, rect.y, rect.w, rect.h);
+    return { img: cropped, error: null, why: `manual crop (${full.why ?? "img"})` };
   }
 
   start(label: string) {
@@ -174,8 +194,10 @@ export class LootTracker {
   private captureAndUpdate(isBaseline: boolean) {
     if (!this.invRegion) return;
 
-    const img: any = captureHoldFullRs();
-    if (!img || typeof img.crop !== "function") return;
+    const full = this.captureFullImageData();
+    if (full.error || !full.img) return;
+
+    const frame = full.img;
 
     const cols = 4, rows = 7;
     const slotW = Math.floor(this.invRegion.w / cols);
@@ -188,18 +210,31 @@ export class LootTracker {
       const sx = this.invRegion.x + col * slotW;
       const sy = this.invRegion.y + row * slotH;
 
-      const icon: any = img.crop(sx + 2, sy + Math.floor(slotH * 0.22), slotW - 4, slotH - 4);
-      const num: any = img.crop(sx + 1, sy + 1, Math.floor(slotW * 0.7), Math.floor(slotH * 0.4));
+      const iconImg = cropImageData(
+        frame,
+        sx + 2,
+        sy + Math.floor(slotH * 0.22),
+        slotW - 4,
+        slotH - 4
+      );
 
-      const sig = aHash64(icon);
-      const qty = readStackNumber(num);
+      const numImg = cropImageData(
+        frame,
+        sx + 1,
+        sy + 1,
+        Math.floor(slotW * 0.7),
+        Math.floor(slotH * 0.4)
+      );
+
+      const sig = aHash64(iconImg);
+      const qty = readStackNumber(numImg);
 
       this.applySlotUpdate(i, sig, qty, isBaseline);
     }
 
     if (!isBaseline && this.moneyRegion) {
-      const money: any = img.crop(this.moneyRegion.x, this.moneyRegion.y, this.moneyRegion.w, this.moneyRegion.h);
-      const gain = readMoneyGain(money);
+      const moneyImg = cropImageData(frame, this.moneyRegion.x, this.moneyRegion.y, this.moneyRegion.w, this.moneyRegion.h);
+      const gain = readMoneyGain(moneyImg);
       if (gain) this.addLoot("coins:pouch", "Coins (Money Pouch)", gain);
     }
 
